@@ -1,0 +1,1121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="Odysseus is a local behavioral authentication prototype for testing continuous trust signals."
+    >
+    <title>Odysseus | Behavioral Trust Console</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/challenge.js" defer></script>
+    <script src="/diagnostics.js" defer></script>
+    <script src="/device.js" defer></script>
+    <script src="/account.js" defer></script>
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to workspace</a>
+
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Odysseus home">
+        <span class="brand-mark" aria-hidden="true">
+          <span></span>
+        </span>
+        <span class="brand-copy">
+          <strong>Odysseus</strong>
+          <small>Behavioral trust console</small>
+        </span>
+      </a>
+
+      <div
+        class="api-status"
+        id="api-status"
+        role="status"
+        aria-live="polite"
+      >
+        <span class="status-dot" aria-hidden="true"></span>
+        Checking engine
+      </div>
+    </header>
+
+    <main id="main-content">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="eyebrow">
+          <span class="eyebrow-line" aria-hidden="true"></span>
+          Continuous authentication prototype
+        </div>
+        <h1 id="hero-title">
+          Trust that adapts to
+          <span>how you interact.</span>
+        </h1>
+        <p class="hero-copy">
+          Complete a short interaction game, then compare a fresh challenge
+          with your baseline. Odysseus turns keyboard and pointer signals into
+          an explainable trust decision.
+        </p>
+      </section>
+
+      <section class="auth-panel" id="auth-panel" aria-labelledby="auth-title">
+        <div class="auth-intro">
+          <div class="auth-index" aria-hidden="true">A/01</div>
+          <div>
+            <p class="panel-kicker">Account access</p>
+            <h2 id="auth-title">Start a protected session</h2>
+            <p>
+              Sign in before enrolling or verifying behavior. This beta uses
+              demo-only accounts on the local Odysseus service. Do not reuse a
+              real password.
+            </p>
+          </div>
+        </div>
+
+        <form class="auth-form" id="auth-form">
+          <div class="field auth-mode-field">
+            <label for="auth-mode">Access mode</label>
+            <select id="auth-mode" name="authMode">
+              <option value="login">Sign in</option>
+              <option value="register">Create account</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="auth-username">Username</label>
+            <input
+              id="auth-username"
+              name="username"
+              type="text"
+              minlength="3"
+              maxlength="64"
+              autocomplete="username"
+              autocapitalize="off"
+              spellcheck="false"
+              required
+            >
+          </div>
+          <div class="field">
+            <label for="auth-password">Password</label>
+            <input
+              id="auth-password"
+              name="password"
+              type="password"
+              minlength="6"
+              maxlength="128"
+              autocomplete="current-password"
+              required
+              aria-describedby="auth-password-help auth-status"
+            >
+            <span class="field-help" id="auth-password-help">
+              Use 6 or more characters. Demo accounts only.
+            </span>
+          </div>
+          <button class="button button-primary" id="auth-submit" type="submit">
+            Sign in
+            <span aria-hidden="true">&rarr;</span>
+          </button>
+        </form>
+
+        <div class="passkey-access">
+          <button
+            class="button button-quiet"
+            id="passkey-login"
+            type="button"
+          >
+            Sign in with a passkey
+          </button>
+          <p
+            id="passkey-login-status"
+            class="compact-status"
+            role="status"
+            aria-live="polite"
+          >
+            Passkeys appear when WebAuthn and the account API support them.
+          </p>
+        </div>
+
+        <div class="current-user-panel" id="current-user-panel" hidden>
+          <span class="session-mark" aria-hidden="true"></span>
+          <div>
+            <span>Authenticated account</span>
+            <strong id="current-user">Not signed in</strong>
+          </div>
+          <button class="button button-quiet" id="logout-button" type="button">
+            Sign out
+          </button>
+        </div>
+
+        <p
+          class="auth-status"
+          id="auth-status"
+          role="status"
+          aria-live="polite"
+        >
+          Sign in or create a local demo account to unlock the workspace.
+        </p>
+      </section>
+
+      <section
+        class="account-recovery-panel"
+        id="account-recovery-panel"
+        aria-labelledby="account-recovery-title"
+      >
+        <details>
+          <summary>
+            <span>
+              <strong id="account-recovery-title">Recover an account</strong>
+              <small>Use a recovery code or start the server flow</small>
+            </span>
+            <span aria-hidden="true">+</span>
+          </summary>
+          <div class="recovery-layout">
+            <form id="recovery-start-form" class="recovery-form">
+              <div>
+                <p class="panel-kicker">Start recovery</p>
+                <h3>Request account help</h3>
+                <p>
+                  The server should return the same neutral response whether
+                  or not a username exists.
+                </p>
+              </div>
+              <div class="field">
+                <label for="recovery-username">Username</label>
+                <input
+                  id="recovery-username"
+                  name="recoveryUsername"
+                  type="text"
+                  minlength="3"
+                  maxlength="64"
+                  autocomplete="username"
+                  required
+                >
+              </div>
+              <button
+                class="button button-primary"
+                id="recovery-start-submit"
+                type="submit"
+              >
+                Start recovery
+              </button>
+              <p
+                class="compact-status"
+                id="recovery-start-status"
+                role="status"
+                aria-live="polite"
+              ></p>
+            </form>
+
+            <form id="recovery-reset-form" class="recovery-form">
+              <div>
+                <p class="panel-kicker">Recovery code</p>
+                <h3>Set a new password</h3>
+                <p>
+                  Recovery codes are single-use secrets. The server remains
+                  the authority on their validity.
+                </p>
+              </div>
+              <div class="recovery-fields">
+                <div class="field">
+                  <label for="recovery-reset-username">Username</label>
+                  <input
+                    id="recovery-reset-username"
+                    name="recoveryResetUsername"
+                    type="text"
+                    autocomplete="username"
+                    required
+                  >
+                </div>
+                <div class="field">
+                  <label for="recovery-code">Recovery code</label>
+                  <input
+                    id="recovery-code"
+                    name="recoveryCode"
+                    type="text"
+                    autocomplete="one-time-code"
+                    required
+                  >
+                </div>
+                <div class="field">
+                  <label for="recovery-password">New password</label>
+                  <input
+                    id="recovery-password"
+                    name="recoveryPassword"
+                    type="password"
+                    minlength="6"
+                    maxlength="128"
+                    autocomplete="new-password"
+                    required
+                  >
+                </div>
+              </div>
+              <button
+                class="button button-primary"
+                id="recovery-reset-submit"
+                type="submit"
+              >
+                Reset password
+              </button>
+              <p
+                class="compact-status"
+                id="recovery-reset-status"
+                role="status"
+                aria-live="polite"
+              ></p>
+            </form>
+          </div>
+
+          <div
+            class="turnstile-hook"
+            id="turnstile-container"
+            aria-label="Automated abuse challenge"
+            hidden
+          ></div>
+          <p
+            class="compact-status turnstile-status"
+            id="turnstile-status"
+            role="status"
+            aria-live="polite"
+          ></p>
+        </details>
+      </section>
+
+      <section class="profile-bar" aria-labelledby="profile-title">
+        <div class="profile-heading">
+          <span class="profile-icon" aria-hidden="true">ID</span>
+          <div>
+            <h2 id="profile-title">Active profile</h2>
+            <p>Your account-scoped behavioral baseline.</p>
+          </div>
+        </div>
+
+        <div class="profile-controls">
+          <div class="field compact-field">
+            <label for="profile-id">Profile ID</label>
+            <input
+              id="profile-id"
+              name="profileId"
+              type="text"
+              maxlength="128"
+              autocomplete="off"
+              disabled
+            >
+          </div>
+          <button
+            class="button button-quiet"
+            id="reset-profile"
+            type="button"
+            disabled
+          >
+            Reset profile
+          </button>
+        </div>
+      </section>
+
+      <div class="workspace">
+        <div class="workflow-column">
+          <section
+            class="panel enrollment-panel"
+            aria-labelledby="enrollment-title"
+          >
+            <div class="panel-header">
+              <div class="step-number" aria-hidden="true">01</div>
+              <div>
+                <p class="panel-kicker">Build a baseline</p>
+                <h2 id="enrollment-title">Enroll your rhythm</h2>
+              </div>
+              <span class="phase-tag" id="enrollment-round-tag">
+                Round 1 of 5
+              </span>
+            </div>
+
+            <p class="panel-copy">
+              Complete five quick Signal Trail missions. Every round combines
+              a forgiving guided phrase, your own free typing, and a moving
+              pointer target for a wider range of natural interaction.
+            </p>
+
+            <div class="assurance-note">
+              <strong>Baseline assurance is limited</strong>
+              <span>
+                Direct browser input is required, which blocks basic scripted
+                event injection. This local demo does not prove human identity.
+              </span>
+            </div>
+
+            <div class="challenge-meta">
+              <div>
+                <span>Current mission</span>
+                <strong id="enrollment-mission">Northern bridge</strong>
+              </div>
+              <div class="challenge-meta-status">
+                <span id="enrollment-text-status">Phrase waiting</span>
+                <span id="enrollment-free-status">Free typing waiting</span>
+                <span id="enrollment-trail-status">Trail 0 of 6</span>
+              </div>
+            </div>
+
+            <div class="prompt-card" aria-label="Enrollment dispatch">
+              <span>Guided phrase</span>
+              <strong id="enrollment-phrase">
+                Quiet signals cross the northern bridge before sunrise
+              </strong>
+            </div>
+
+            <form class="challenge-form" id="enrollment-form">
+              <div class="field">
+                <label for="enrollment-input">Type the guided phrase</label>
+                <input
+                  id="enrollment-input"
+                  name="enrollmentSample"
+                  type="text"
+                  placeholder="Type it naturally small typos are fine"
+                  autocomplete="off"
+                  autocapitalize="off"
+                  spellcheck="false"
+                  aria-describedby="enrollment-help enrollment-status"
+                  disabled
+                >
+                <span class="field-help" id="enrollment-help">
+                  Odysseus accepts capitalization, spacing, punctuation, and
+                  small typos automatically. No Enter key is needed.
+                </span>
+              </div>
+
+              <div class="field free-typing-field">
+                <div class="field-label-row">
+                  <label for="enrollment-free-input">Free typing</label>
+                  <span>24 characters and 4 words</span>
+                </div>
+                <textarea
+                  id="enrollment-free-input"
+                  name="enrollmentFreeSample"
+                  rows="2"
+                  maxlength="240"
+                  placeholder="Write one short thought in your own words"
+                  autocomplete="off"
+                  aria-describedby="enrollment-free-help enrollment-status"
+                  disabled
+                ></textarea>
+                <span class="field-help" id="enrollment-free-help">
+                  Write anything natural. Both typing fields stay in this
+                  browser and are cleared after the round.
+                </span>
+              </div>
+
+              <section
+                class="signal-trail"
+                aria-labelledby="enrollment-trail-title"
+              >
+                <div class="signal-trail-heading">
+                  <div>
+                    <span>Pointer mini game</span>
+                    <strong id="enrollment-trail-title">
+                      Follow the glowing signal
+                    </strong>
+                  </div>
+                  <small>Move naturally between targets</small>
+                </div>
+                <div
+                  class="signal-board"
+                  id="enrollment-board"
+                  role="group"
+                  aria-label="Enrollment pointer trail"
+                >
+                  <button class="signal-target" type="button" data-slot="0"></button>
+                  <button class="signal-target" type="button" data-slot="1"></button>
+                  <button class="signal-target" type="button" data-slot="2"></button>
+                  <button class="signal-target" type="button" data-slot="3"></button>
+                  <button class="signal-target" type="button" data-slot="4"></button>
+                  <button class="signal-target" type="button" data-slot="5"></button>
+                  <button class="signal-target" type="button" data-slot="6"></button>
+                  <button class="signal-target" type="button" data-slot="7"></button>
+                  <button class="signal-target" type="button" data-slot="8"></button>
+                </div>
+              </section>
+
+              <div class="challenge-actions">
+                <span>
+                  The round records automatically when all three tasks are
+                  ready
+                </span>
+              </div>
+            </form>
+
+            <div class="progress-block">
+              <div class="progress-label">
+                <span>Signal Trail progress</span>
+                <strong id="enrollment-progress-label">0 of 5</strong>
+              </div>
+              <div
+                class="sample-progress"
+                id="enrollment-progress"
+                role="progressbar"
+                aria-label="Enrollment missions"
+                aria-valuemin="0"
+                aria-valuemax="5"
+                aria-valuenow="0"
+              >
+                <span class="sample-segment"></span>
+                <span class="sample-segment"></span>
+                <span class="sample-segment"></span>
+                <span class="sample-segment"></span>
+                <span class="sample-segment"></span>
+              </div>
+            </div>
+
+            <p
+              class="inline-status"
+              id="enrollment-status"
+              role="status"
+              aria-live="polite"
+            >
+              Ready for the first mission.
+            </p>
+          </section>
+
+          <section
+            class="panel verification-panel"
+            aria-labelledby="verification-title"
+          >
+            <div class="panel-header">
+              <div class="step-number" aria-hidden="true">02</div>
+              <div>
+                <p class="panel-kicker">Compare behavior</p>
+                <h2 id="verification-title">Verify a session</h2>
+              </div>
+              <span class="phase-tag phase-tag-live">
+                <span aria-hidden="true"></span>
+                Live signals
+              </span>
+            </div>
+
+            <p class="panel-copy">
+              Complete one new mission to compare your current interaction
+              with the saved baseline. Guided and free typing are evaluated
+              locally, and a new mission appears after every decision.
+            </p>
+
+            <div class="challenge-meta">
+              <div>
+                <span>Verification mission</span>
+                <strong id="verification-mission">Steady session</strong>
+              </div>
+              <div class="challenge-meta-status">
+                <span id="verification-text-status">Phrase waiting</span>
+                <span id="verification-free-status">Free typing waiting</span>
+                <span id="verification-trail-status">Trail 0 of 6</span>
+              </div>
+            </div>
+
+            <div class="prompt-card" aria-label="Verification dispatch">
+              <span>Guided phrase</span>
+              <strong id="verification-phrase">
+                A trusted session combines steady typing with smooth movement
+              </strong>
+            </div>
+
+            <form class="challenge-form" id="verification-form">
+              <div class="field">
+                <label for="verification-input">Type the guided phrase</label>
+                <input
+                  id="verification-input"
+                  name="verificationSample"
+                  type="text"
+                  placeholder="Type it naturally small typos are fine"
+                  autocomplete="off"
+                  autocapitalize="off"
+                  spellcheck="false"
+                  aria-describedby="verification-help verification-status"
+                  disabled
+                >
+                <span class="field-help" id="verification-help">
+                  Odysseus accepts capitalization, spacing, punctuation, and
+                  small typos automatically. No Enter key is needed.
+                </span>
+              </div>
+
+              <div class="field free-typing-field">
+                <div class="field-label-row">
+                  <label for="verification-free-input">Free typing</label>
+                  <span>24 characters and 4 words</span>
+                </div>
+                <textarea
+                  id="verification-free-input"
+                  name="verificationFreeSample"
+                  rows="2"
+                  maxlength="240"
+                  placeholder="Write one short thought in your own words"
+                  autocomplete="off"
+                  aria-describedby="verification-free-help verification-status"
+                  disabled
+                ></textarea>
+                <span class="field-help" id="verification-free-help">
+                  Write anything natural. Both typing fields stay in this
+                  browser and are cleared after the decision.
+                </span>
+              </div>
+
+              <section
+                class="signal-trail"
+                aria-labelledby="verification-trail-title"
+              >
+                <div class="signal-trail-heading">
+                  <div>
+                    <span>Pointer mini game</span>
+                    <strong id="verification-trail-title">
+                      Follow the glowing signal
+                    </strong>
+                  </div>
+                  <small>Six targets complete the trail</small>
+                </div>
+                <div
+                  class="signal-board"
+                  id="verification-board"
+                  role="group"
+                  aria-label="Verification pointer trail"
+                >
+                  <button class="signal-target" type="button" data-slot="0"></button>
+                  <button class="signal-target" type="button" data-slot="1"></button>
+                  <button class="signal-target" type="button" data-slot="2"></button>
+                  <button class="signal-target" type="button" data-slot="3"></button>
+                  <button class="signal-target" type="button" data-slot="4"></button>
+                  <button class="signal-target" type="button" data-slot="5"></button>
+                  <button class="signal-target" type="button" data-slot="6"></button>
+                  <button class="signal-target" type="button" data-slot="7"></button>
+                  <button class="signal-target" type="button" data-slot="8"></button>
+                </div>
+              </section>
+
+              <div class="challenge-actions">
+                <span>
+                  Analysis starts automatically when all three tasks are ready
+                </span>
+                <button
+                  class="button button-quiet"
+                  id="reset-verification"
+                  type="button"
+                  disabled
+                >
+                  Restart mission
+                </button>
+              </div>
+            </form>
+
+            <p
+              class="inline-status"
+              id="verification-status"
+              role="status"
+              aria-live="polite"
+            ></p>
+          </section>
+        </div>
+
+        <aside class="trust-panel" aria-labelledby="trust-title">
+          <div class="trust-header">
+            <div>
+              <p class="panel-kicker">Session decision</p>
+              <h2 id="trust-title">Live trust</h2>
+            </div>
+            <span class="trust-state" id="trust-state">Not evaluated</span>
+          </div>
+
+          <div class="score-row">
+            <div class="score-value">
+              <strong id="trust-score">0</strong>
+              <span>/100</span>
+            </div>
+            <p>Confidence that this interaction matches the active profile.</p>
+          </div>
+
+          <div class="trust-meter">
+            <div
+              class="trust-track"
+              role="progressbar"
+              aria-label="Current trust score"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              aria-valuenow="0"
+            >
+              <span id="trust-fill"></span>
+            </div>
+            <div class="trust-scale" aria-hidden="true">
+              <span>Challenge</span>
+              <span>Review</span>
+              <span>Trusted</span>
+            </div>
+          </div>
+
+          <div class="decision-card">
+            <span class="decision-icon" aria-hidden="true">
+              <span></span>
+            </span>
+            <div>
+              <h3>Why this decision</h3>
+              <p id="decision-reason">
+                Complete enrollment and a verification mission to
+                calculate trust.
+              </p>
+            </div>
+          </div>
+
+          <section class="metrics" aria-labelledby="metrics-title">
+            <div class="section-heading">
+              <h3 id="metrics-title">Signal snapshot</h3>
+              <span>Current sample</span>
+            </div>
+
+            <dl class="metric-grid">
+              <div class="metric">
+                <dt>
+                  Key dwell
+                  <span>Average hold</span>
+                </dt>
+                <dd>
+                  <strong id="metric-dwell">0</strong>
+                  <small>ms</small>
+                </dd>
+              </div>
+              <div class="metric">
+                <dt>
+                  Key flight
+                  <span>Between keys</span>
+                </dt>
+                <dd>
+                  <strong id="metric-flight">0</strong>
+                  <small>ms</small>
+                </dd>
+              </div>
+              <div class="metric">
+                <dt>
+                  Pointer pace
+                  <span>Average speed</span>
+                </dt>
+                <dd>
+                  <strong id="metric-pointer">0</strong>
+                  <small>px/s</small>
+                </dd>
+              </div>
+            </dl>
+          </section>
+
+          <section
+            class="step-up-warning"
+            id="step-up-warning"
+            aria-labelledby="step-up-title"
+            hidden
+          >
+            <span class="warning-mark" aria-hidden="true">!</span>
+            <div class="step-up-content">
+              <strong id="step-up-title">Step-up verification required</strong>
+              <p>
+                Confirm your account password before Odysseus asks the server to
+                release this protected record.
+              </p>
+              <form class="step-up-form" id="step-up-form">
+                <div class="field">
+                  <label for="step-up-password">Account password</label>
+                  <input
+                    id="step-up-password"
+                    name="stepUpPassword"
+                    type="password"
+                    minlength="6"
+                    maxlength="128"
+                    autocomplete="current-password"
+                    required
+                    aria-describedby="step-up-status"
+                  >
+                </div>
+                <button
+                  class="button button-step-up"
+                  id="step-up-submit"
+                  type="submit"
+                >
+                  Confirm identity
+                </button>
+              </form>
+              <p
+                class="step-up-status"
+                id="step-up-status"
+                role="status"
+                aria-live="polite"
+              ></p>
+            </div>
+          </section>
+
+          <div class="sensitive-action">
+            <div>
+              <span class="action-label">Protected account data</span>
+              <h3>Open security report</h3>
+              <p>View real profile and authorization details.</p>
+            </div>
+            <button
+              class="button button-action"
+              id="sensitive-action"
+              type="button"
+              disabled
+            >
+              Generate report
+            </button>
+          </div>
+
+          <section
+            class="action-result"
+            id="action-result"
+            role="status"
+            aria-live="polite"
+            hidden
+          ></section>
+        </aside>
+      </div>
+
+      <section
+        class="security-center"
+        id="security-center"
+        aria-labelledby="security-center-title"
+        hidden
+      >
+        <div class="security-center-header">
+          <div>
+            <p class="eyebrow">
+              <span class="eyebrow-line" aria-hidden="true"></span>
+              Account and device security
+            </p>
+            <h2 id="security-center-title">Your security center</h2>
+            <p>
+              Signed in as <strong id="security-user"></strong>. Device and
+              behavioral signals are confidence inputs, not proof of a human
+              identity.
+            </p>
+          </div>
+          <div class="capability-note">
+            <strong>Capability limits</strong>
+            <span>
+              The exact device model may be unavailable. A browser also
+              cannot establish that one specific human is present.
+            </span>
+          </div>
+        </div>
+
+        <div class="security-grid">
+          <article class="security-card device-card">
+            <div class="security-card-header">
+              <div>
+                <p class="panel-kicker">Current browser</p>
+                <h3>Device descriptor</h3>
+              </div>
+              <span class="security-card-index">D/01</span>
+            </div>
+            <p id="current-device-summary">
+              Collecting coarse device signals.
+            </p>
+            <dl class="device-facts">
+              <div>
+                <dt>Class</dt>
+                <dd id="device-kind">Unavailable</dd>
+              </div>
+              <div>
+                <dt>Platform</dt>
+                <dd id="device-platform">Unavailable</dd>
+              </div>
+              <div>
+                <dt>Browser</dt>
+                <dd id="device-browser">Unavailable</dd>
+              </div>
+              <div>
+                <dt>Exact model</dt>
+                <dd id="device-model">Unavailable</dd>
+              </div>
+              <div>
+                <dt>Screen class</dt>
+                <dd id="device-screen">Unavailable</dd>
+              </div>
+            </dl>
+            <p
+              class="compact-status"
+              id="device-fingerprint-status"
+              role="status"
+            >
+              Optional local fingerprint adapter not checked.
+            </p>
+            <div class="security-actions">
+              <button
+                class="button button-primary"
+                id="register-device"
+                type="button"
+              >
+                Register this device
+              </button>
+              <button
+                class="button button-quiet"
+                id="refresh-devices"
+                type="button"
+              >
+                Refresh list
+              </button>
+            </div>
+            <p
+              class="compact-status"
+              id="device-status"
+              role="status"
+              aria-live="polite"
+            ></p>
+            <ul class="managed-device-list" id="device-list"></ul>
+          </article>
+
+          <article class="security-card">
+            <div class="security-card-header">
+              <div>
+                <p class="panel-kicker">Strong access</p>
+                <h3>Passkeys and recovery</h3>
+              </div>
+              <span class="security-card-index">A/02</span>
+            </div>
+            <p>
+              Register a WebAuthn passkey when the browser and account API
+              both support it.
+            </p>
+            <button
+              class="button button-primary"
+              id="passkey-register"
+              type="button"
+            >
+              Register a passkey
+            </button>
+            <p
+              class="compact-status"
+              id="passkey-status"
+              role="status"
+              aria-live="polite"
+            ></p>
+
+            <div class="recovery-code-block">
+              <div>
+                <h4>One-time recovery codes</h4>
+                <p>
+                  Generate, save, then clear them. Codes are never stored by
+                  this page after sign-out.
+                </p>
+              </div>
+              <div class="security-actions">
+                <button
+                  class="button button-quiet"
+                  id="generate-recovery-codes"
+                  type="button"
+                >
+                  Generate codes
+                </button>
+                <button
+                  class="button button-quiet"
+                  id="download-recovery-codes"
+                  type="button"
+                  disabled
+                >
+                  Download
+                </button>
+                <button
+                  class="button button-quiet"
+                  id="clear-recovery-codes"
+                  type="button"
+                  disabled
+                >
+                  Clear
+                </button>
+              </div>
+              <ol
+                class="recovery-code-list"
+                id="recovery-codes"
+                aria-label="New recovery codes"
+                hidden
+              ></ol>
+              <p
+                class="compact-status"
+                id="recovery-codes-status"
+                role="status"
+                aria-live="polite"
+              ></p>
+            </div>
+          </article>
+
+          <article class="security-card">
+            <div class="security-card-header">
+              <div>
+                <p class="panel-kicker">Signal quality</p>
+                <h3>Confidence and drift</h3>
+              </div>
+              <span class="security-card-index">S/03</span>
+            </div>
+            <dl class="confidence-grid">
+              <div>
+                <dt>Calibration</dt>
+                <dd id="calibration-value">Unavailable</dd>
+              </div>
+              <div>
+                <dt>Behavior drift</dt>
+                <dd id="drift-value">Unavailable</dd>
+              </div>
+              <div>
+                <dt>Device confidence</dt>
+                <dd id="device-confidence-value">Unavailable</dd>
+              </div>
+            </dl>
+            <p
+              class="compact-status"
+              id="confidence-status"
+              role="status"
+              aria-live="polite"
+            ></p>
+
+            <div class="explanation-panel">
+              <div class="explanation-label">
+                <strong>AI explanation</strong>
+                <span>Non-authoritative</span>
+              </div>
+              <p id="explanation-text">
+                AI text can summarize signals, but it does not override the
+                measured score or server policy.
+              </p>
+              <button
+                class="button button-quiet"
+                id="explanation-request"
+                type="button"
+              >
+                Explain current signals
+              </button>
+              <p
+                class="compact-status"
+                id="explanation-status"
+                role="status"
+                aria-live="polite"
+              ></p>
+            </div>
+          </article>
+
+          <article class="security-card notification-card">
+            <div class="security-card-header">
+              <div>
+                <p class="panel-kicker">Account activity</p>
+                <h3>
+                  Notifications
+                  <span
+                    class="notification-count"
+                    id="notification-count"
+                    hidden
+                  >0</span>
+                </h3>
+              </div>
+              <button
+                class="button button-quiet"
+                id="notification-refresh"
+                type="button"
+              >
+                Refresh
+              </button>
+            </div>
+            <p
+              class="compact-status"
+              id="notification-status"
+              role="status"
+              aria-live="polite"
+            ></p>
+            <ul class="notification-list" id="notification-list"></ul>
+          </article>
+        </div>
+
+        <section
+          class="admin-dashboard"
+          id="admin-dashboard"
+          aria-labelledby="admin-dashboard-title"
+          hidden
+        >
+          <div>
+            <p class="panel-kicker">Restricted</p>
+            <h3 id="admin-dashboard-title">Administrator dashboard</h3>
+            <p
+              class="compact-status"
+              id="admin-status"
+              role="status"
+              aria-live="polite"
+            ></p>
+          </div>
+          <dl class="admin-metrics">
+            <div>
+              <dt>Users</dt>
+              <dd id="admin-users">Unavailable</dd>
+            </div>
+            <div>
+              <dt>Active sessions</dt>
+              <dd id="admin-sessions">Unavailable</dd>
+            </div>
+            <div>
+              <dt>Open alerts</dt>
+              <dd id="admin-alerts">Unavailable</dd>
+            </div>
+          </dl>
+        </section>
+
+        <section class="danger-zone" aria-labelledby="delete-account-title">
+          <div>
+            <p class="panel-kicker">Danger zone</p>
+            <h3 id="delete-account-title">Delete this account</h3>
+            <p>
+              This request should permanently remove the account, devices,
+              passkeys, profiles, and active sessions on the server.
+            </p>
+          </div>
+          <form id="delete-account-form" class="delete-account-form">
+            <div class="field">
+              <label for="delete-account-confirmation">
+                Type your username to confirm
+              </label>
+              <input
+                id="delete-account-confirmation"
+                name="deleteAccountConfirmation"
+                type="text"
+                autocomplete="off"
+                required
+              >
+            </div>
+            <label class="confirmation-check">
+              <input
+                id="delete-account-acknowledgement"
+                type="checkbox"
+                required
+              >
+              <span>I understand this action is permanent.</span>
+            </label>
+            <button
+              class="button button-danger"
+              id="delete-account-submit"
+              type="submit"
+            >
+              Delete account
+            </button>
+            <p
+              class="compact-status"
+              id="delete-account-status"
+              role="status"
+              aria-live="polite"
+            ></p>
+          </form>
+        </section>
+      </section>
+
+      <section class="prototype-note" aria-labelledby="prototype-title">
+        <span class="prototype-index" aria-hidden="true">P/01</span>
+        <div>
+          <h2 id="prototype-title">A focused local prototype</h2>
+          <p>
+            Odysseus demonstrates behavioral scoring with a varied interaction
+            challenge and a small sample set. It is not a production identity
+            system and should not be the only control protecting a real
+            account.
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <span>Odysseus behavioral trust console</span>
+      <span>Prototype build</span>
+    </footer>
+  </body>
+</html>
