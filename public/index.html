@@ -1146,7 +1146,14 @@
             </div>
           </section>
 
-          <details class="technical-report-control">
+          <!--
+            Technical session details hidden: the authenticated report renders
+            aggregate keyboard, cursor, network, device and display telemetry.
+            That is the behavioral record, and it is only ever viewed through
+            the bypass-gated /admin report - never by the account holder.
+            app.js still binds these nodes, so they stay in the DOM.
+          -->
+          <details class="technical-report-control" hidden>
             <summary>Technical session details</summary>
             <div class="sensitive-action">
               <div>

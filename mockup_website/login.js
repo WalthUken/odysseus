@@ -344,342 +344,29 @@ document.addEventListener('DOMContentLoaded', () => {
    which meant every telemetry batch they produced afterwards was
    thrown away - exactly the comparison the system exists to make.
 
-   The collector below is the same one app.js runs on the
-   dashboard (itself adapted from public/telemetry.js): identical
-   feature names, identical thresholds and identical arithmetic,
-   so a sample taken here is comparable with the profile enrolled
-   there. The mockup is served from a different origin than
-   Odysseus, so it is reimplemented rather than imported, and
-   app.js cannot be loaded on this page - its DOMContentLoaded
-   handler bounces unauthenticated visitors straight back to
-   login.html.
+   The measurement comes from telemetry.js, the same collector
+   app.js runs on the dashboard, so a sample taken here is
+   comparable with the profile enrolled there and a feature added
+   to that file reaches the backend without this one being
+   touched. app.js itself cannot be loaded on this page: its
+   DOMContentLoaded handler bounces unauthenticated visitors
+   straight back to login.html.
 
    Keyboard source: the sign-in username and password fields.
    Pointer source: the whole document.
    Nothing about any of this is ever shown to the visitor.
    ============================================================ */
 
-const AUTH_FEATURE_NAMES = [
-    'dwellMean',
-    'dwellDeviation',
-    'flightMean',
-    'flightDeviation',
-    'downDownMean',
-    'downDownDeviation',
-    'pointerVelocityMean',
-    'pointerVelocityDeviation',
-    'pointerAccelerationMean',
-    'pointerAccelerationDeviation',
-    'pointerJitterMean',
-    'pointerJitterDeviation'
-];
-
-const AUTH_TELEMETRY_DEFAULTS = {
-    pointerThrottleMs: 80,
+// Readiness thresholds for a sign-in window, matching the auth-time collector
+// in public/app.js. A sign-in card is typed on, not navigated: pointer movement
+// is welcome but never required, and the backend decides per family whether a
+// sample carries enough of it to score, dropping the families that fall short.
+const AUTH_READINESS = {
     minimumDwellSamples: 10,
     minimumFlightSamples: 8,
     minimumDownDownSamples: 8,
-    // A sign-in card is typed on, not navigated. Pointer movement is welcome
-    // but never required, matching the auth-time collector in public/app.js:
-    // the backend decides per family whether a sample carries enough of it to
-    // score, and drops the families that fall short.
-    minimumPointerSamples: 0,
-    maximumMetricSamples: 240,
-    requireTrustedEvents: true
+    minimumPointerSamples: 0
 };
-
-function createAuthBehaviorCollector(options) {
-    const supplied = options || {};
-    const config = Object.assign({}, AUTH_TELEMETRY_DEFAULTS, supplied);
-    const keyboardTarget = supplied.keyboardTarget || null;
-    const pointerTarget = supplied.pointerTarget || document;
-    const shouldCaptureKeyboard =
-        typeof supplied.shouldCaptureKeyboard === 'function'
-            ? supplied.shouldCaptureKeyboard
-            : null;
-
-    function perfNow() {
-        return (window.performance && typeof window.performance.now === 'function')
-            ? window.performance.now()
-            : Date.now();
-    }
-
-    function mean(values) {
-        if (!values.length) return 0;
-        return values.reduce((total, value) => total + value, 0) / values.length;
-    }
-
-    function meanAbsoluteDeviation(values, average) {
-        if (!values.length) return 0;
-        return values.reduce((total, value) => total + Math.abs(value - average), 0) / values.length;
-    }
-
-    function summarize(values) {
-        const average = mean(values);
-        return [average, meanAbsoluteDeviation(values, average)];
-    }
-
-    function addBounded(values, value, limit) {
-        if (!Number.isFinite(value)) return;
-        values.push(value);
-        if (values.length > limit) {
-            values.splice(0, values.length - limit);
-        }
-    }
-
-    function clamp(value, minimum, maximum) {
-        return Math.min(maximum, Math.max(minimum, value));
-    }
-
-    function isTrusted(event) {
-        return Boolean(event && event.isTrusted === true);
-    }
-
-    const state = {
-        started: false,
-        metrics: null,
-        activePresses: [],
-        lastKeyDownAt: null,
-        lastKeyUpAt: null,
-        lastPointer: null,
-        lastPointerVelocity: null,
-        lastPointerAngle: null,
-        rejectedSyntheticEvents: 0,
-        windowStartedAt: 0
-    };
-
-    function reset() {
-        state.metrics = {
-            dwell: [],
-            flight: [],
-            downDown: [],
-            pointerVelocity: [],
-            pointerAcceleration: [],
-            pointerJitter: []
-        };
-        state.activePresses = [];
-        state.lastKeyDownAt = null;
-        state.lastKeyUpAt = null;
-        state.lastPointer = null;
-        state.lastPointerVelocity = null;
-        state.lastPointerAngle = null;
-        state.rejectedSyntheticEvents = 0;
-        state.windowStartedAt = perfNow();
-    }
-
-    function accepts(event) {
-        if (config.requireTrustedEvents === false || isTrusted(event)) {
-            return true;
-        }
-        // Reject any synthetic / automated event.
-        state.rejectedSyntheticEvents += 1;
-        return false;
-    }
-
-    function captureKeyboard(event) {
-        return shouldCaptureKeyboard ? Boolean(shouldCaptureKeyboard(event)) : true;
-    }
-
-    function handleKeyDown(event) {
-        if (!accepts(event) || event.repeat || !captureKeyboard(event)) {
-            return;
-        }
-        const timestamp = perfNow();
-        const limit = config.maximumMetricSamples;
-
-        if (state.lastKeyDownAt !== null) {
-            const downDown = timestamp - state.lastKeyDownAt;
-            if (downDown >= 5 && downDown <= 5000) {
-                addBounded(state.metrics.downDown, downDown, limit);
-            }
-        }
-        if (state.lastKeyUpAt !== null) {
-            const flight = timestamp - state.lastKeyUpAt;
-            if (flight >= -1000 && flight <= 5000) {
-                addBounded(state.metrics.flight, flight, limit);
-            }
-        }
-        state.activePresses.push({ downAt: timestamp });
-        if (state.activePresses.length > 12) {
-            state.activePresses.shift();
-        }
-        state.lastKeyDownAt = timestamp;
-    }
-
-    function handleKeyUp(event) {
-        if (!accepts(event) || !captureKeyboard(event)) {
-            return;
-        }
-        const timestamp = perfNow();
-        const press = state.activePresses.shift();
-        if (press) {
-            const dwell = timestamp - press.downAt;
-            if (dwell >= 5 && dwell <= 5000) {
-                addBounded(state.metrics.dwell, dwell, config.maximumMetricSamples);
-            }
-        }
-        state.lastKeyUpAt = timestamp;
-    }
-
-    function handlePointerMove(event) {
-        if (!accepts(event)) {
-            return;
-        }
-        const timestamp = perfNow();
-        if (state.lastPointer && timestamp - state.lastPointer.timestamp < config.pointerThrottleMs) {
-            return;
-        }
-
-        const current = {
-            x: Number(event.clientX),
-            y: Number(event.clientY),
-            timestamp: timestamp
-        };
-
-        if (!Number.isFinite(current.x) || !Number.isFinite(current.y) || !state.lastPointer) {
-            state.lastPointer = current;
-            return;
-        }
-
-        const elapsedMs = timestamp - state.lastPointer.timestamp;
-        if (elapsedMs <= 0 || elapsedMs > 3000) {
-            state.lastPointer = current;
-            state.lastPointerVelocity = null;
-            state.lastPointerAngle = null;
-            return;
-        }
-
-        const dx = current.x - state.lastPointer.x;
-        const dy = current.y - state.lastPointer.y;
-        const distance = Math.hypot(dx, dy);
-        const elapsedSeconds = elapsedMs / 1000;
-        const velocity = distance / elapsedSeconds;
-        const angle = distance > 0 ? Math.atan2(dy, dx) : state.lastPointerAngle;
-        const limit = config.maximumMetricSamples;
-
-        if (velocity <= 100000) {
-            addBounded(state.metrics.pointerVelocity, velocity, limit);
-        }
-
-        if (state.lastPointerVelocity !== null) {
-            const acceleration = Math.abs(velocity - state.lastPointerVelocity) / elapsedSeconds;
-            if (acceleration <= 1000000) {
-                addBounded(state.metrics.pointerAcceleration, acceleration, limit);
-            }
-        }
-
-        if (angle !== null && state.lastPointerAngle !== null && distance > 0) {
-            let angleChange = Math.abs(angle - state.lastPointerAngle);
-            if (angleChange > Math.PI) {
-                angleChange = 2 * Math.PI - angleChange;
-            }
-            addBounded(state.metrics.pointerJitter, clamp(angleChange / Math.PI, 0, 1), limit);
-        }
-
-        state.lastPointer = current;
-        state.lastPointerVelocity = velocity;
-        if (angle !== null) {
-            state.lastPointerAngle = angle;
-        }
-    }
-
-    function handleVisibilityChange() {
-        if (document.hidden) {
-            state.activePresses.length = 0;
-            state.lastKeyDownAt = null;
-            state.lastKeyUpAt = null;
-            state.lastPointer = null;
-            state.lastPointerVelocity = null;
-            state.lastPointerAngle = null;
-        }
-    }
-
-    function sampleCounts() {
-        return {
-            dwell: state.metrics.dwell.length,
-            flight: state.metrics.flight.length,
-            downDown: state.metrics.downDown.length,
-            pointer: state.metrics.pointerVelocity.length
-        };
-    }
-
-    function isReady() {
-        const counts = sampleCounts();
-        return (
-            counts.dwell >= config.minimumDwellSamples &&
-            counts.flight >= config.minimumFlightSamples &&
-            counts.downDown >= config.minimumDownDownSamples &&
-            counts.pointer >= config.minimumPointerSamples
-        );
-    }
-
-    function readiness() {
-        return { ready: isReady(), counts: sampleCounts() };
-    }
-
-    function finalize() {
-        // A window that has not filled up is left intact, so the keystrokes a
-        // visitor already produced still count towards their next attempt.
-        if (!isReady()) {
-            return { ok: false, counts: sampleCounts() };
-        }
-        const dwell = summarize(state.metrics.dwell);
-        const flight = summarize(state.metrics.flight);
-        const downDown = summarize(state.metrics.downDown);
-        const pointerVelocity = summarize(state.metrics.pointerVelocity);
-        const pointerAcceleration = summarize(state.metrics.pointerAcceleration);
-        const pointerJitter = summarize(state.metrics.pointerJitter);
-
-        const featureValues = [
-            dwell[0], dwell[1],
-            flight[0], flight[1],
-            downDown[0], downDown[1],
-            pointerVelocity[0], pointerVelocity[1],
-            pointerAcceleration[0], pointerAcceleration[1],
-            pointerJitter[0], pointerJitter[1]
-        ].map(value => Number(value.toFixed(6)));
-
-        const vector = {};
-        AUTH_FEATURE_NAMES.forEach((name, index) => {
-            vector[name] = featureValues[index];
-        });
-
-        const result = {
-            ok: true,
-            vector: vector,
-            counts: sampleCounts(),
-            integrity: {
-                trustedEventsRequired: config.requireTrustedEvents !== false,
-                rejectedSyntheticEvents: state.rejectedSyntheticEvents
-            },
-            durationMs: Math.round(perfNow() - state.windowStartedAt)
-        };
-        reset();
-        return result;
-    }
-
-    function start() {
-        if (state.started) return;
-        if (keyboardTarget) {
-            keyboardTarget.addEventListener('keydown', handleKeyDown, { passive: true });
-            keyboardTarget.addEventListener('keyup', handleKeyUp, { passive: true });
-        }
-        if (pointerTarget) {
-            pointerTarget.addEventListener('pointermove', handlePointerMove, { passive: true });
-            pointerTarget.addEventListener('mousemove', handlePointerMove, { passive: true });
-        }
-        document.addEventListener('visibilitychange', handleVisibilityChange, { passive: true });
-        state.started = true;
-    }
-
-    reset();
-
-    return {
-        start: start,
-        readiness: readiness,
-        finalize: finalize
-    };
-}
 
 function boundedEvidenceInteger(value, maximum) {
     return Math.max(0, Math.min(maximum, Math.round(Number(value) || 0)));
@@ -703,9 +390,10 @@ function boundedEvidenceCounts(counts) {
 function startAuthEvidence(usernameInput, passwordInput) {
     let collector = null;
     try {
-        // Use the shared collector from telemetry.js (loaded in login.html).
-        // This ensures both the login page and dashboard emit identical feature names and semantics.
+        // The shared collector from telemetry.js, loaded by login.html, so this
+        // page and the dashboard emit the same feature names and semantics.
         collector = window.OdysseusTelemetry.createCollector({
+            ...AUTH_READINESS,
             keyboardTarget: document,
             pointerTarget: document,
             // Listen at the document level and narrow to the sign-in fields, so
