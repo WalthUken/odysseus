@@ -6,6 +6,37 @@ const RECOVERY_CODE_COUNT_MIN = 4;
 const RECOVERY_CODE_COUNT_MAX = 20;
 const MAX_NOTIFICATION_LIMIT = 200;
 const MAX_ADMIN_EVENT_LIMIT = 500;
+const GEMINI_FEATURE_NAMES = new Set([
+  "dwellMean",
+  "dwellDeviation",
+  "flightMean",
+  "flightDeviation",
+  "downDownMean",
+  "downDownDeviation",
+  "pointerVelocityMean",
+  "pointerVelocityDeviation",
+  "pointerAccelerationMean",
+  "pointerAccelerationDeviation",
+  "pointerJitterMean",
+  "pointerJitterDeviation",
+]);
+const GEMINI_ASSESSMENT_BANDS = Object.freeze({
+  allow: Object.freeze({
+    trustPercent: 80,
+    normalizedDistance: 0.5,
+    reasonCode: "BEHAVIOR_MATCH",
+  }),
+  step_up: Object.freeze({
+    trustPercent: 50,
+    normalizedDistance: 1.5,
+    reasonCode: "BEHAVIOR_DRIFT",
+  }),
+  deny: Object.freeze({
+    trustPercent: 20,
+    normalizedDistance: 3,
+    reasonCode: "BEHAVIOR_MISMATCH",
+  }),
+});
 
 function assertFunction(value, name) {
   if (typeof value !== "function") {
@@ -57,6 +88,7 @@ function validateContext(context) {
     "getAdminOverview",
     "getAdminSecurityEventAggregates",
     "getUserByUsername",
+    "listAudit",
     "listSecurityNotifications",
     "markSecurityNotificationRead",
     "replaceRecoveryCodes",
@@ -89,6 +121,13 @@ function validateContext(context) {
     && context.observedIp !== null
   ) {
     assertFunction(context.observedIp, "observedIp");
+  }
+  if (
+    context.geminiProvider !== undefined
+    && context.geminiProvider !== null
+  ) {
+    assertObject(context.geminiProvider, "geminiProvider");
+    assertFunction(context.geminiProvider.explain, "geminiProvider.explain");
   }
   if (
     context.humanProofRequired !== undefined
@@ -810,25 +849,161 @@ function registerExplanationRoute(app, context) {
     context.verificationLimiter,
     context.requireCsrf,
     context.requireAuthentication,
-    async (request) => {
+    context.requireRecentStrongAuthorization,
+    async (request, response) => {
       const body = requireBody(request, context);
       allowOnly(
         body,
-        new Set(["profileId", "trustScore", "context"]),
+        new Set(["profileId"]),
         context,
       );
+      const provider = context.geminiProvider;
+      const readiness = provider && typeof provider.readiness === "function"
+        ? await provider.readiness()
+        : { disabled: !provider };
+      if (!provider || readiness?.disabled === true) {
+        await audit(context, request, {
+          userId: request.auth.user.id,
+          sessionId: request.auth.session.id,
+          eventType: "ai.explanation",
+          outcome: "unavailable",
+          reasonCode: "GEMINI_DISABLED",
+        });
+        throw new context.HttpError(
+          501,
+          "GEMINI_DISABLED",
+          "AI explanations are not enabled.",
+        );
+      }
+
+      const requestedProfile = body.profileId === undefined
+        ? null
+        : boundedString(body.profileId, "profileId", context, {
+            maximum: 128,
+            pattern: /^[A-Za-z0-9_-]+$/,
+          });
+      const events = await context.database.listAudit({
+        userId: request.auth.user.id,
+        limit: 50,
+      });
+      const verification = events.find((event) => {
+        if (event.eventType !== "behavior.verify") {
+          return false;
+        }
+        const profileId = event.metadata?.profileId;
+        return !requestedProfile || profileId === requestedProfile;
+      });
+      const metadata = verification?.metadata;
+      if (!metadata || typeof metadata !== "object") {
+        await audit(context, request, {
+          userId: request.auth.user.id,
+          sessionId: request.auth.session.id,
+          eventType: "ai.explanation",
+          outcome: "unavailable",
+          reasonCode: "VERIFICATION_REPORT_REQUIRED",
+        });
+        throw new context.HttpError(
+          409,
+          "VERIFICATION_REPORT_REQUIRED",
+          "Complete a session check before requesting an explanation.",
+        );
+      }
+
+      const decision = metadata.decision;
+      const trustPercent = Number(metadata.trustPercent);
+      const normalizedDistance = Number(metadata.normalizedDistance);
+      const acceptanceThreshold = Number(metadata.acceptanceThreshold);
+      if (
+        !Object.hasOwn(GEMINI_ASSESSMENT_BANDS, decision)
+        || !Number.isFinite(trustPercent)
+        || !Number.isFinite(normalizedDistance)
+        || !Number.isFinite(acceptanceThreshold)
+      ) {
+        throw new context.HttpError(
+          409,
+          "VERIFICATION_REPORT_INVALID",
+          "The latest session check is not suitable for explanation.",
+        );
+      }
+      const assessmentBand = GEMINI_ASSESSMENT_BANDS[decision];
+      const featureDeltas = Array.isArray(metadata.featureDeltas)
+        ? metadata.featureDeltas.slice(0, 24)
+        : [];
+      const report = {
+        version: 1,
+        assessment: {
+          decision,
+          trustPercent: assessmentBand.trustPercent,
+          normalizedDistance: assessmentBand.normalizedDistance,
+          acceptanceThreshold: 1,
+          reasonCodes: [assessmentBand.reasonCode],
+        },
+        signals: featureDeltas
+          .filter(
+            (feature) => (
+              feature
+              && GEMINI_FEATURE_NAMES.has(feature.name)
+              && Number.isFinite(Number(feature.normalizedDelta))
+            ),
+          )
+          .map((feature) => {
+            const delta = Number(feature.normalizedDelta);
+            return {
+              name: feature.name,
+              direction:
+                Math.abs(delta) < 0.05
+                  ? "stable"
+                  : delta > 0
+                    ? "higher"
+                    : "lower",
+              deviationRatio:
+                Math.abs(delta) < 0.5
+                  ? 0
+                  : Math.abs(delta) < 1.5
+                    ? 1
+                    : Math.abs(delta) < 3
+                      ? 2
+                      : 3,
+            };
+          }),
+      };
+      const result = await provider.explain(report);
+      if (!result?.generated || !result.prose) {
+        const code = String(result?.code || "GEMINI_UNAVAILABLE")
+          .replace(/[^A-Z0-9_]/g, "")
+          .slice(0, 64) || "GEMINI_UNAVAILABLE";
+        await audit(context, request, {
+          userId: request.auth.user.id,
+          sessionId: request.auth.session.id,
+          eventType: "ai.explanation",
+          outcome: "unavailable",
+          reasonCode: code,
+        });
+        throw new context.HttpError(
+          503,
+          code,
+          "The advisory explanation service is temporarily unavailable.",
+        );
+      }
       await audit(context, request, {
         userId: request.auth.user.id,
         sessionId: request.auth.session.id,
         eventType: "ai.explanation",
-        outcome: "unavailable",
-        reasonCode: "GEMINI_DISABLED",
+        outcome: "success",
+        metadata: {
+          provider: "gemini",
+          advisoryOnly: true,
+          sourceEventId: verification.id,
+        },
       });
-      throw new context.HttpError(
-        501,
-        "GEMINI_DISABLED",
-        "AI explanations are not enabled.",
-      );
+      response.json({
+        explanation: result.prose,
+        details: result.explanation,
+        provider: "gemini",
+        model: result.model,
+        advisoryOnly: true,
+        authorizationDecision: null,
+      });
     },
   );
 }

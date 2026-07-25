@@ -4,36 +4,37 @@ Date: 2026-07-25
 
 ## Executive finding
 
-Gemini is not running in either reviewed commit.
+The optional advisory path is connected but remains outside authorization.
 
-Commit `da42af2` contains a planned explanation boundary in the protected report and browser UI. It does not contain a Gemini adapter, API route, provider configuration, provider readiness check, or Gemini runtime tests.
+- The server builds the provider from server-side environment configuration.
+- Gemini is not a required readiness provider.
+- The account-management endpoint accepts only an optional owned `profileId`.
+- The server resolves the latest finalized behavior audit for that account.
+- A fixed allowlist converts that record into a bounded aggregate report.
+- Client scores, thresholds, decisions, signals, and narratives are rejected.
+- The adapter uses the Interactions API with `store: false` and
+  `background: false`.
+- The key is sent only in the `x-goog-api-key` header.
+- The browser calls the provider only after an explicit user action.
+- Provider output remains advisory with `authorizationDecision: null`.
 
-Commit `796b6e6` adds a substantial adapter scaffold, provider tests, readiness wiring, an account UI panel, and an explanation endpoint. The application still disables Gemini deliberately:
+Without a key, the endpoint reports a disabled provider and the rest of the
+application remains operational. The user-level key tested on July 25, 2026
+returned HTTP 401 and remains outside the repository. Gemini must be considered
+unavailable until the provider-side authorization setup succeeds.
 
-- Provider construction receives an empty configuration object.
-- Gemini is removed from the set of required providers.
-- The mounted account-management route always returns `501 GEMINI_DISABLED`.
-- The account-security route receives `geminiProvider: null`.
-- The browser handles the disabled response and tells the user to rely on deterministic results.
-- No Gemini environment variables are documented in `.env.example`.
+## Current implementation inventory
 
-A second, fuller explanation route exists in the account-security module, but it is not registered. It must not simply be switched on. Its input object does not match the adapter's required report schema, so the adapter would reject it. The dead route also accepts client-reported values that should instead be derived from server-owned records.
-
-The safe path is to reuse the adapter's strongest ideas, replace its data contract, update its API transport, remove the dead duplicate route, and introduce the feature through explicit rollout gates.
-
-## Reviewed implementation inventory
-
-| Area | Commit `da42af2` | Commit `796b6e6` | Target decision |
-|---|---|---|---|
-| Runtime provider call | None | Implemented in a scaffold but disabled by server wiring | Keep disabled by default |
-| Adapter | None | `src/gemini-explanation.js` | Refactor before enabling |
-| Active API route | None | `POST /api/explanations` always returns 501 | Replace only after safety gates pass |
-| Duplicate route | None | Fuller route exists but is not registered | Delete the dead route |
-| Environment configuration | None | None in `.env.example` | Add target-prefixed, off-by-default variables |
-| Readiness | Static report text only | Optional provider readiness exists | Preserve optional status |
-| Browser UI | Shows a future explanation boundary | Adds a request button and disabled fallback | Keep hidden until visible rollout |
-| Unit tests | No provider tests | Adapter, disabled runtime, route, and UI tests exist | Expand with privacy and policy invariants |
-| Authorization effect | None | Adapter returns `authorizationDecision: null` | Enforce as an architectural invariant |
+| Area | Current state | Production target |
+|---|---|---|
+| Runtime provider call | Optional and explicit | Keep disabled by default |
+| Adapter | Interactions API | Pin and revalidate API revision |
+| Active API route | Server-owned account audit input | Add full coarse privacy projection |
+| Environment configuration | Server-only key and model | Add mode, cost, and concurrency controls |
+| Readiness | Optional provider state | Preserve optional status |
+| Browser UI | Explicit request and advisory label | Hide unless rollout mode is visible |
+| Unit tests | Transport, validation, and route tests | Expand policy-invariance coverage |
+| Authorization effect | Always null | Preserve as an architectural invariant |
 
 ## Existing strengths worth preserving
 
@@ -53,34 +54,26 @@ The branch scaffold already includes several good controls:
 
 These controls are necessary, but they are not sufficient for production enablement.
 
-## Problems that must be fixed before enablement
+## Remaining work before production enablement
 
-### 1. The active route and the adapter are intentionally disconnected
+### 1. Provider mode and cost controls are incomplete
 
-The mounted endpoint always returns 501. The adapter exists, but the server does not give it credentials and does not pass it to the mounted route.
+Add explicit `off`, `shadow`, and `visible` modes, a global kill switch,
+concurrency limits, daily cost controls, and internal-account rollout gates.
 
-### 2. The unregistered route has the wrong input contract
+### 2. Policy invariance needs broader tests
 
-The adapter requires:
+The current code keeps provider output separate from authorization. Add a
+dedicated suite proving byte-for-byte equality of policy, grant, session,
+device, profile, and audit state across provider success, timeout, malformed
+output, and attempted policy language.
 
-- `version`
-- `assessment`
-- `signals`
+### 3. The privacy projection should become fully coarse
 
-The unregistered route constructs:
-
-- `schemaVersion`
-- `context`
-- `profileId`
-- `trustScore`
-- `limitations`
-- `securitySignals`
-
-Enabling that route as written would not work.
-
-### 3. Client-reported analytical values are accepted
-
-The browser sends a profile identifier and trust score. A generated explanation must be based only on server-owned, finalized analysis. The browser may select an owned profile, but it must never supply a score, threshold, decision, signal, or narrative for the provider request.
+The browser now sends only an optional owned profile identifier. The server
+creates the analytical input from a finalized account audit. The next version
+should convert every provider value to fixed enums and remove numerical scores,
+distances, and thresholds before transport.
 
 ### 4. The provider payload exposes more precision than Gemini needs
 
@@ -88,9 +81,11 @@ The current adapter accepts a decision, trust percentage, normalized distance, a
 
 Removing them creates a stronger safety boundary. The model cannot change or restate a threshold or score it never receives.
 
-### 5. The transport uses an older request shape
+### 5. Provider authorization is not operational
 
-The scaffold calls the legacy `generateContent` endpoint and includes `temperature`. Current official guidance recommends the Interactions API for new request-response work. Current Gemini 3.x guidance also marks sampling parameters such as `temperature` as deprecated for newer model releases.
+The locally configured authorization key returned HTTP 401 from the Interactions
+API. Resolve the provider-side project and model access before any visible
+rollout. Do not work around the failure by putting a key in browser code.
 
 ### 6. The output validator is necessary but too narrow
 
@@ -338,7 +333,7 @@ Recommended request properties:
 
 ```json
 {
-  "model": "gemini-3.5-flash-lite",
+  "model": "gemini-3.6-flash",
   "store": false,
   "background": false,
   "system_instruction": "Explain only the supplied coarse behavior signal bands. Do not infer identity, intent, authorization, fraud, human status, bot status, scores, thresholds, devices, or networks. Return only the required JSON object.",
@@ -377,7 +372,9 @@ Do not configure:
 - Streaming
 - Live sessions
 
-`gemini-3.5-flash-lite` is the current stable, low-cost fit for a short structured explanation as of 2026-07-25. Model availability changes. Recheck the official model and deprecation pages before each production rollout.
+`gemini-3.6-flash` is the configured structured-explanation model as of
+2026-07-25. Model availability changes. Recheck the official model and
+deprecation pages before each production rollout.
 
 The official documentation says the Interactions API stores requests by default, so `store: false` is mandatory. A paid project does not use prompts and responses to improve products, but limited abuse-monitoring retention can still apply unless zero-data-retention approval is in place. Zero-data-retention approval is a production rollout gate, not an optional improvement.
 
@@ -558,7 +555,7 @@ Add placeholders only:
 ```text
 ODYSSEUS_GEMINI_MODE=off
 ODYSSEUS_GEMINI_API_KEY=
-ODYSSEUS_GEMINI_MODEL=gemini-3.5-flash-lite
+ODYSSEUS_GEMINI_MODEL=gemini-3.6-flash
 ODYSSEUS_GEMINI_TIMEOUT_MS=5000
 ODYSSEUS_GEMINI_MAX_CONCURRENCY=2
 ```

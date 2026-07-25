@@ -894,7 +894,7 @@
     if (!authenticated()) return;
     setStatus(
       elements.confidenceStatus,
-      "Loading calibration and drift signals.",
+      "Loading setup quality and session consistency.",
       "working"
     );
     try {
@@ -952,7 +952,7 @@
       setStatus(
         elements.confidenceStatus,
         optionalError(error)
-          ? "Calibration, drift, and device confidence are not exposed by this API."
+          ? "Setup quality, session consistency, and device status are not exposed by this API."
           : errorMessage(error, "Confidence signals could not be loaded."),
         optionalError(error) ? "neutral" : "error"
       );
@@ -975,11 +975,6 @@
             typeof state.config.getProfileId === "function"
               ? state.config.getProfileId()
               : undefined,
-          trustScore:
-            typeof state.config.getTrustScore === "function"
-              ? state.config.getTrustScore()
-              : undefined,
-          context: "account_security_summary",
         }),
       });
       const explanation =

@@ -143,20 +143,20 @@ test("generates strictly labeled Gemini prose without authorization", async () =
     fetchImpl: async (url, options) => {
       request = { url, options };
       return jsonResponse({
-        candidates: [
+        steps: [
           {
-            content: {
-              parts: [
-                {
-                  text: JSON.stringify({
-                    headline: "Interaction changed",
-                    summary: "Several timing signals differ from baseline.",
-                    observations: ["Key hold duration increased."],
-                    nextStep: "Use Odysseus's configured verification flow.",
-                  }),
-                },
-              ],
-            },
+            type: "model_output",
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  headline: "Interaction changed",
+                  summary: "Several timing signals differ from baseline.",
+                  observations: ["Key hold duration increased."],
+                  nextStep: "Use Odysseus's configured verification flow.",
+                }),
+              },
+            ],
           },
         ],
       });
@@ -171,11 +171,12 @@ test("generates strictly labeled Gemini prose without authorization", async () =
   assert.doesNotMatch(request.url, /test-gemini-key/);
   assert.equal(request.options.headers["x-goog-api-key"], "test-gemini-key");
   const sent = JSON.parse(request.options.body);
-  assert.equal(
-    sent.generationConfig.responseMimeType,
-    "application/json"
-  );
-  assert.equal(sent.generationConfig.responseSchema.additionalProperties, false);
+  assert.equal(sent.model, "gemini-test");
+  assert.equal(sent.store, false);
+  assert.equal(sent.background, false);
+  assert.equal(sent.response_format.mime_type, "application/json");
+  assert.equal(sent.response_format.schema.additionalProperties, false);
+  assert.equal("temperature" in sent.generation_config, false);
 });
 
 test("rejects unstructured Gemini reports before transport", async () => {
@@ -209,20 +210,20 @@ test("rejects Gemini prose that attempts to authorize access", async () => {
     apiKey: "test-gemini-key",
     fetchImpl: async () =>
       jsonResponse({
-        candidates: [
+        steps: [
           {
-            content: {
-              parts: [
-                {
-                  text: JSON.stringify({
-                    headline: "Access is allowed",
-                    summary: "The model attempted to decide access.",
-                    observations: ["Timing changed."],
-                    nextStep: "Continue.",
-                  }),
-                },
-              ],
-            },
+            type: "model_output",
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  headline: "Access is allowed",
+                  summary: "The model attempted to decide access.",
+                  observations: ["Timing changed."],
+                  nextStep: "Continue.",
+                }),
+              },
+            ],
           },
         ],
       }),

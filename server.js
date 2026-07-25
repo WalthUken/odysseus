@@ -643,7 +643,15 @@ async function createApp(options = {}) {
           expectedActions: turnstileActions,
           fetchImpl: options.fetchImpl,
         },
-        gemini: {},
+        gemini: {
+          apiKey:
+            options.geminiApiKey
+            ?? environment.ODYSSEUS_GEMINI_API_KEY,
+          model:
+            options.geminiModel
+            ?? environment.ODYSSEUS_GEMINI_MODEL,
+          fetchImpl: options.fetchImpl,
+        },
         huggingFace: {
           endpointUrl:
             options.huggingFaceEndpoint
@@ -1311,7 +1319,7 @@ async function createApp(options = {}) {
     decodeWebAuthnClientData: decodeClientData,
     deviceCookieTtlMs,
     evaluateDeviceConfidence,
-    geminiProvider: null,
+    geminiProvider: providerRuntime.gemini,
     huggingFaceProvider: providerRuntime.huggingFace,
     initializeCrossDeviceTransfer,
     normalizeUsername,
@@ -1346,6 +1354,7 @@ async function createApp(options = {}) {
     hashPassword,
     humanProofRequired: turnstileConfigured,
     isAdministrator,
+    geminiProvider: providerRuntime.gemini,
     normalizeUsername,
     notificationService: providerRuntime.notifications,
     observedIp,
@@ -1860,8 +1869,8 @@ async function createApp(options = {}) {
       response.json({
         authorizedBy,
         record: {
-          reportVersion: 3,
-          id: `ATH-ACCESS-${String(accessEvent.id).padStart(6, "0")}`,
+          reportVersion: 4,
+          id: `ODY-ACCESS-${String(accessEvent.id).padStart(6, "0")}`,
           title: "Account security report",
           classification: "Protected account data",
           generatedAt: accessEvent.createdAt,
@@ -1902,7 +1911,13 @@ async function createApp(options = {}) {
             createdAt: request.auth.session.createdAt,
             lastSeenAt: request.auth.session.lastSeenAt,
             expiresAt: request.auth.session.expiresAt,
+            behaviorGrantActive: behaviorActive,
+            stepUpActive,
+            deviceBound: Boolean(request.device),
           },
+          device: request.device
+            ? publicDevice(request.device, request.device.id)
+            : null,
           network: {
             currentIpAddress,
             latestVerificationIpAddress:

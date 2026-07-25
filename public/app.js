@@ -56,6 +56,8 @@
     stepUpSubmit: "step-up-submit",
     stepUpStatus: "step-up-status",
     sensitiveAction: "sensitive-action",
+    actionStatus: "action-status",
+    securityReport: "security-report",
     actionResult: "action-result",
   });
 
@@ -68,6 +70,7 @@
   let trustScore = 0;
   let verificationInFlight = false;
   let intervalId = null;
+  let sessionObserver = null;
   let hydrationSequence = 0;
   let currentUser = null;
   let authInFlight = false;
@@ -281,7 +284,7 @@
       setText(
         elements.enrollmentRoundTag,
         enrolled
-          ? "Baseline saved"
+          ? "Setup saved"
           : `Round ${Math.min(
               enrollmentRoundIndex + 1,
               REQUIRED_ENROLLMENT_SAMPLES
@@ -306,9 +309,9 @@
       String(comparison.needsCorrection)
     );
 
-    let freeStatus = "Free typing waiting";
+    let freeStatus = "Answer waiting";
     if (freeTyping.complete) {
-      freeStatus = "Free typing ready";
+      freeStatus = "Answer ready";
     } else if (freeTyping.characterCount > 0) {
       freeStatus =
         freeTyping.remainingCharacters > 0
@@ -474,7 +477,7 @@
     renderChallenge(mode);
     setInlineStatus(
       challengeReferences(mode).status,
-      "Direct keyboard and pointer input is required. Script-dispatched events are not accepted.",
+      "Direct browser input is required. Script-dispatched events are not accepted.",
       "error"
     );
   }
@@ -627,7 +630,7 @@
     }
     setInlineStatus(
       statusElement || elements.authStatus,
-      "Sign in before using the behavioral workspace.",
+      "Sign in before using the account workspace.",
       "error"
     );
     elements.authUsername.focus();
@@ -820,7 +823,7 @@
       elements.authStatus,
       registering
         ? "Create a local demo account. Do not reuse a real password."
-        : "Sign in to restore your account-scoped behavioral profile.",
+        : "Sign in to restore your saved account setup.",
       "neutral"
     );
   }
@@ -944,7 +947,7 @@
         method: "POST",
         body: JSON.stringify({}),
       });
-      showSignedOut("Signed out. Local behavioral controls are locked.", "ready");
+      showSignedOut("Signed out. Local account controls are locked.", "ready");
       try {
         await ensureCsrfToken();
       } catch (_error) {
@@ -984,7 +987,7 @@
         output,
         comparison.needsCorrection
           ? "That phrase is a little too different. Make a quick edit and Odysseus will accept it automatically."
-          : "Finish the guided phrase. Capitalization, spacing, punctuation, and small typos are fine.",
+          : "Finish the reading prompt. Capitalization, spacing, punctuation, and small typos are fine.",
         comparison.needsCorrection
           ? "error"
           : "collecting"
@@ -1027,7 +1030,7 @@
     cancelAutoSubmit(mode);
     setInlineStatus(
       output,
-      `Tasks complete. Keep writing in the free-typing box or moving naturally: ${readiness.counts.dwell} key timings and ${readiness.counts.pointer} pointer samples captured.`,
+      "Tasks complete. Keep answering or moving naturally while the check finishes.",
       "collecting"
     );
   }
@@ -1044,7 +1047,7 @@
       if (enrolled) {
         setInlineStatus(
           elements.enrollmentStatus,
-          "Reset the profile before creating another baseline.",
+          "Reset the profile before creating another saved setup.",
           "error"
         );
       }
@@ -1053,7 +1056,7 @@
     if (!challengeTasksComplete("enrollment")) {
       setInlineStatus(
         elements.enrollmentStatus,
-        "Finish the guided phrase, free typing, and pointer trail before recording this round.",
+        "Finish the reading prompt, your answer, and the route before recording this round.",
         "error"
       );
       return;
@@ -1091,7 +1094,7 @@
     clearChallengeInputs("enrollment");
     setInlineStatus(
       elements.enrollmentStatus,
-      "Creating the behavioral baseline.",
+      "Saving the account setup.",
       "working"
     );
 
@@ -1112,7 +1115,7 @@
       setText(
         elements.decisionReason,
         responseReason(result) ||
-          "Baseline saved. Verification is ready for this profile."
+          "Setup saved. The returning session check is ready."
       );
       setInlineStatus(
         elements.enrollmentStatus,
@@ -1123,7 +1126,7 @@
       elements.verificationInput.focus();
       if (global.OdysseusAccount) {
         global.OdysseusAccount.pushNotification(
-          "Behavioral baseline ready",
+          "Saved setup ready",
           "Five interaction missions were accepted for this profile.",
           "ready"
         );
@@ -1167,7 +1170,7 @@
       if (source === "explicit") {
         setInlineStatus(
           elements.verificationStatus,
-          "Finish the guided phrase, free typing, and pointer trail before analyzing behavior.",
+          "Finish the reading prompt, your answer, and the route before running the check.",
           "error"
         );
       }
@@ -1192,7 +1195,7 @@
     renderChallenge("verification");
     setInlineStatus(
       elements.verificationStatus,
-      "Comparing this behavior with the baseline.",
+      "Comparing this session with the saved setup.",
       "working"
     );
 
@@ -1216,7 +1219,7 @@
       updateTrust(normalized, allowed, decision);
       setText(
         elements.decisionReason,
-        responseReason(result) || "Current behavior was compared with the baseline."
+        responseReason(result) || "The current session was compared with the saved setup."
       );
       setInlineStatus(
         elements.verificationStatus,
@@ -1226,7 +1229,7 @@
       resetChallenge("verification", { advance: true });
       if (global.OdysseusAccount) {
         global.OdysseusAccount.pushNotification(
-          allowed ? "Behavior verified" : "Behavior review required",
+          allowed ? "Session matched" : "Session review required",
           `The server returned a trust score of ${Math.round(
             normalized * 100
           )}.`,
@@ -1280,8 +1283,12 @@
       "Complete enrollment and a verification mission to calculate trust."
     );
     setText(elements.actionResult, "");
-    elements.actionResult.hidden = true;
     elements.actionResult.removeAttribute("data-state");
+    setText(elements.actionStatus, "");
+    elements.actionStatus.hidden = true;
+    elements.actionStatus.removeAttribute("data-state");
+    elements.securityReport.hidden = true;
+    elements.securityReport.removeAttribute("open");
     elements.stepUpWarning.hidden = true;
     elements.stepUpField.value = "";
     setInlineStatus(elements.stepUpStatus, "", "neutral");
@@ -1300,7 +1307,7 @@
     if (!id) {
       setInlineStatus(
         elements.enrollmentStatus,
-        "Enter a profile ID to enroll or restore a baseline.",
+        "Enter a profile ID to create or restore a saved setup.",
         "neutral"
       );
       return;
@@ -1308,7 +1315,7 @@
 
     setInlineStatus(
       elements.enrollmentStatus,
-      "Checking for an existing baseline.",
+      "Checking for an existing setup.",
       "working"
     );
 
@@ -1327,7 +1334,7 @@
       if (result.notFound) {
         setInlineStatus(
           elements.enrollmentStatus,
-          "No baseline found. Ready for the first mission.",
+          "No saved setup found. Ready for the first check-in.",
           "neutral"
         );
         return;
@@ -1342,14 +1349,14 @@
       setText(
         elements.decisionReason,
         result.enrolledAt
-          ? `Existing baseline from ${new Date(
+          ? `Existing setup from ${new Date(
               result.enrolledAt
             ).toLocaleString()} is ready. Complete a verification mission.`
-          : "Existing baseline restored. Complete a verification mission."
+          : "Existing setup restored. Complete a returning session check."
       );
       setInlineStatus(
         elements.enrollmentStatus,
-        "Existing baseline restored.",
+        "Existing setup restored.",
         "ready"
       );
     } catch (error) {
@@ -1371,7 +1378,7 @@
     elements.resetProfile.disabled = true;
     setInlineStatus(
       elements.enrollmentStatus,
-      "Removing the behavioral baseline.",
+      "Removing the saved setup.",
       "working"
     );
     try {
@@ -1603,7 +1610,7 @@
     const record = result && result.record;
     if (!record || typeof record !== "object") {
       setInlineStatus(
-        elements.actionResult,
+        elements.actionStatus,
         "Access passed, but the server returned no report data.",
         "error"
       );
@@ -1626,6 +1633,10 @@
       record.session && typeof record.session === "object"
         ? record.session
         : {};
+    const device =
+      record.device && typeof record.device === "object"
+        ? record.device
+        : null;
     const latestVerification =
       record.latestVerification &&
       typeof record.latestVerification === "object"
@@ -1668,10 +1679,20 @@
     const recommendations = Array.isArray(record.recommendations)
       ? record.recommendations
       : [];
+    const localSession = sessionObserver
+      ? sessionObserver.snapshot()
+      : null;
 
     setText(elements.actionResult, "");
-    elements.actionResult.hidden = false;
     elements.actionResult.dataset.state = "ready";
+    elements.securityReport.hidden = false;
+    elements.securityReport.removeAttribute("open");
+    elements.actionStatus.hidden = false;
+    setInlineStatus(
+      elements.actionStatus,
+      "Authenticated report ready. Open the detailed report when you want to inspect it.",
+      "ready"
+    );
 
     const header = global.document.createElement("div");
     header.className = "security-report-header";
@@ -2063,6 +2084,103 @@
         }, ${formatReportDate(event.createdAt)}`,
       })
     );
+    appendReportList(
+      elements.actionResult,
+      "Current registered device",
+      device
+        ? [
+            {
+              primary: device.label || "Current device",
+              secondary: [
+                device.descriptor?.kind,
+                device.descriptor?.platform,
+                device.descriptor?.browserBrands,
+                device.current ? "current device" : null,
+              ].filter(Boolean).join(", "),
+            },
+          ]
+        : [],
+      (item) => item
+    );
+    appendReportList(
+      elements.actionResult,
+      "Session protection state",
+      [
+        {
+          primary: "Behavior grant",
+          secondary: session.behaviorGrantActive ? "active" : "inactive",
+        },
+        {
+          primary: "Password step-up",
+          secondary: session.stepUpActive ? "active" : "inactive",
+        },
+        {
+          primary: "Device binding",
+          secondary: session.deviceBound ? "present" : "not present",
+        },
+      ],
+      (item) => item
+    );
+    appendReportList(
+      elements.actionResult,
+      "Browser display indicators",
+      localSession
+        ? [
+            {
+              primary: "Layout viewport",
+              secondary: `${localSession.display.layoutViewport.widthPx ?? "Unavailable"} x ${localSession.display.layoutViewport.heightPx ?? "Unavailable"} px`,
+            },
+            {
+              primary: "Visual viewport",
+              secondary: `${localSession.display.visualViewport.widthPx ?? "Unavailable"} x ${localSession.display.visualViewport.heightPx ?? "Unavailable"} px at scale ${localSession.display.visualViewport.scale ?? "Unavailable"}`,
+            },
+            {
+              primary: "Display scale indicators",
+              secondary: `Device pixel ratio ${localSession.display.scaleIndicators.devicePixelRatio ?? "Unavailable"}. ${localSession.display.scaleIndicators.note}`,
+            },
+            {
+              primary: "Screen",
+              secondary: `${localSession.display.screen.widthPx ?? "Unavailable"} x ${localSession.display.screen.heightPx ?? "Unavailable"} px`,
+            },
+          ]
+        : [],
+      (item) => item
+    );
+    appendReportList(
+      elements.actionResult,
+      "Browser page activity",
+      localSession
+        ? [
+            {
+              primary: "Time on this page",
+              secondary: formatReportMetric(
+                localSession.pageSession.elapsedMs,
+                "ms"
+              ),
+            },
+            {
+              primary: "Focus changes",
+              secondary: `${localSession.pageSession.focusLosses} losses and ${localSession.pageSession.focusReturns} returns`,
+            },
+            {
+              primary: "Window changes",
+              secondary: `${localSession.pageSession.resizeEvents} resizes, ${localSession.pageSession.orientationChanges} orientation changes, and ${localSession.pageSession.visibilityChanges} visibility changes`,
+            },
+          ]
+        : [],
+      (item) => item
+    );
+    appendReportNotes(
+      elements.actionResult,
+      "Browser-only detail boundary",
+      localSession
+        ? [
+            localSession.privacy.location,
+            localSession.privacy.excluded,
+          ]
+        : [],
+      "positive"
+    );
     appendReportNotes(
       elements.actionResult,
       "Recommended next steps",
@@ -2078,16 +2196,16 @@
   }
 
   async function performSensitiveAction() {
-    if (!requireAuth(elements.actionResult) || actionInFlight) {
+    if (!requireAuth(elements.actionStatus) || actionInFlight) {
       return;
     }
 
     actionInFlight = true;
     setWorkspaceControls();
-    elements.actionResult.hidden = false;
+    elements.actionStatus.hidden = false;
     setInlineStatus(
-      elements.actionResult,
-      "Asking the server to generate your protected security report.",
+      elements.actionStatus,
+      "Preparing the authenticated technical report.",
       "working"
     );
 
@@ -2117,12 +2235,12 @@
           true
         );
         setInlineStatus(
-          elements.actionResult,
+          elements.actionStatus,
           "Access paused until the server confirms your password.",
           "error"
         );
       } else {
-        setInlineStatus(elements.actionResult, error.message, "error");
+        setInlineStatus(elements.actionStatus, error.message, "error");
       }
     } finally {
       actionInFlight = false;
@@ -2251,6 +2369,7 @@
       !global.OdysseusChallenge ||
       !global.OdysseusDiagnostics ||
       !global.OdysseusDevice ||
+      !global.OdysseusSession ||
       !global.OdysseusAccount
     ) {
       global.console.error(
@@ -2283,6 +2402,7 @@
       },
     });
     collector.start();
+    sessionObserver = global.OdysseusSession.createObserver(global);
 
     elements.enrollmentForm.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -2412,6 +2532,10 @@
     }
     if (collector) {
       collector.destroy();
+    }
+    if (sessionObserver) {
+      sessionObserver.destroy();
+      sessionObserver = null;
     }
     if (global.OdysseusAccount) {
       global.OdysseusAccount.destroy();

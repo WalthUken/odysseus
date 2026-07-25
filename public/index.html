@@ -5,13 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta
       name="description"
-      content="Odysseus is a local behavioral authentication prototype for testing continuous trust signals."
+      content="Odysseus is a local adaptive account security prototype."
     >
-    <title>Odysseus | Behavioral Trust Console</title>
+    <title>Odysseus | Account Console</title>
     <link rel="stylesheet" href="/styles.css">
     <script src="/challenge.js" defer></script>
     <script src="/diagnostics.js" defer></script>
     <script src="/device.js" defer></script>
+    <script src="/session.js" defer></script>
     <script src="/account.js" defer></script>
     <script src="/app.js" defer></script>
   </head>
@@ -25,7 +26,7 @@
         </span>
         <span class="brand-copy">
           <strong>Odysseus</strong>
-          <small>Behavioral trust console</small>
+          <small>Account console</small>
         </span>
       </a>
 
@@ -44,16 +45,16 @@
       <section class="hero" aria-labelledby="hero-title">
         <div class="eyebrow">
           <span class="eyebrow-line" aria-hidden="true"></span>
-          Continuous authentication prototype
+          Adaptive account security
         </div>
         <h1 id="hero-title">
-          Trust that adapts to
-          <span>how you interact.</span>
+          A quieter way to
+          <span>check a session.</span>
         </h1>
         <p class="hero-copy">
-          Complete a short interaction game, then compare a fresh challenge
-          with your baseline. Odysseus turns keyboard and pointer signals into
-          an explainable trust decision.
+          Sign in, complete a few short account prompts, and review a clear
+          session decision. The technical detail stays out of the way unless
+          you choose to open it.
         </p>
       </section>
 
@@ -64,9 +65,9 @@
             <p class="panel-kicker">Account access</p>
             <h2 id="auth-title">Start a protected session</h2>
             <p>
-              Sign in before enrolling or verifying behavior. This beta uses
-              demo-only accounts on the local Odysseus service. Do not reuse a
-              real password.
+              This local beta uses demo-only accounts. After sign-in, a few
+              short questions help set up the session. Do not reuse a real
+              password.
             </p>
           </div>
         </div>
@@ -283,7 +284,7 @@
           <span class="profile-icon" aria-hidden="true">ID</span>
           <div>
             <h2 id="profile-title">Active profile</h2>
-            <p>Your account-scoped behavioral baseline.</p>
+            <p>The saved setup for this account and device.</p>
           </div>
         </div>
 
@@ -319,8 +320,8 @@
             <div class="panel-header">
               <div class="step-number" aria-hidden="true">01</div>
               <div>
-                <p class="panel-kicker">Build a baseline</p>
-                <h2 id="enrollment-title">Enroll your rhythm</h2>
+                <p class="panel-kicker">Quick account check</p>
+                <h2 id="enrollment-title">Set up this session</h2>
               </div>
               <span class="phase-tag" id="enrollment-round-tag">
                 Round 1 of 5
@@ -328,33 +329,33 @@
             </div>
 
             <p class="panel-copy">
-              Complete five quick Signal Trail missions. Every round combines
-              a forgiving guided phrase, your own free typing, and a moving
-              pointer target for a wider range of natural interaction.
+              Complete five short check-ins. Each one includes a reading
+              prompt, one answer in your own words, and a quick route across
+              the board.
             </p>
 
             <div class="assurance-note">
-              <strong>Baseline assurance is limited</strong>
+              <strong>What this check can establish</strong>
               <span>
                 Direct browser input is required, which blocks basic scripted
-                event injection. This local demo does not prove human identity.
+                event injection. This local demo does not prove who a person is.
               </span>
             </div>
 
             <div class="challenge-meta">
               <div>
-                <span>Current mission</span>
+                <span>Check-in question</span>
                 <strong id="enrollment-mission">Northern bridge</strong>
               </div>
               <div class="challenge-meta-status">
                 <span id="enrollment-text-status">Phrase waiting</span>
-                <span id="enrollment-free-status">Free typing waiting</span>
+                <span id="enrollment-free-status">Answer waiting</span>
                 <span id="enrollment-trail-status">Trail 0 of 6</span>
               </div>
             </div>
 
-            <div class="prompt-card" aria-label="Enrollment dispatch">
-              <span>Guided phrase</span>
+            <div class="prompt-card" aria-label="Enrollment reading prompt">
+              <span>Reading prompt</span>
               <strong id="enrollment-phrase">
                 Quiet signals cross the northern bridge before sunrise
               </strong>
@@ -362,7 +363,7 @@
 
             <form class="challenge-form" id="enrollment-form">
               <div class="field">
-                <label for="enrollment-input">Type the guided phrase</label>
+                <label for="enrollment-input">Type the reading prompt</label>
                 <input
                   id="enrollment-input"
                   name="enrollmentSample"
@@ -382,7 +383,7 @@
 
               <div class="field free-typing-field">
                 <div class="field-label-row">
-                  <label for="enrollment-free-input">Free typing</label>
+                  <label for="enrollment-free-input">Your answer</label>
                   <span>24 characters and 4 words</span>
                 </div>
                 <textarea
@@ -396,8 +397,8 @@
                   disabled
                 ></textarea>
                 <span class="field-help" id="enrollment-free-help">
-                  Write anything natural. Both typing fields stay in this
-                  browser and are cleared after the round.
+                  Answer the check-in question without including private
+                  information. Both fields are cleared after the round.
                 </span>
               </div>
 
@@ -407,9 +408,9 @@
               >
                 <div class="signal-trail-heading">
                   <div>
-                    <span>Pointer mini game</span>
+                    <span>Quick route</span>
                     <strong id="enrollment-trail-title">
-                      Follow the glowing signal
+                      Follow the highlighted points
                     </strong>
                   </div>
                   <small>Move naturally between targets</small>
@@ -418,7 +419,7 @@
                   class="signal-board"
                   id="enrollment-board"
                   role="group"
-                  aria-label="Enrollment pointer trail"
+                  aria-label="Enrollment route board"
                 >
                   <button class="signal-target" type="button" data-slot="0"></button>
                   <button class="signal-target" type="button" data-slot="1"></button>
@@ -442,7 +443,7 @@
 
             <div class="progress-block">
               <div class="progress-label">
-                <span>Signal Trail progress</span>
+                <span>Setup progress</span>
                 <strong id="enrollment-progress-label">0 of 5</strong>
               </div>
               <div
@@ -479,35 +480,35 @@
             <div class="panel-header">
               <div class="step-number" aria-hidden="true">02</div>
               <div>
-                <p class="panel-kicker">Compare behavior</p>
-                <h2 id="verification-title">Verify a session</h2>
+                <p class="panel-kicker">Returning session</p>
+                <h2 id="verification-title">Run a quick check</h2>
               </div>
               <span class="phase-tag phase-tag-live">
                 <span aria-hidden="true"></span>
-                Live signals
+                Session live
               </span>
             </div>
 
             <p class="panel-copy">
-              Complete one new mission to compare your current interaction
-              with the saved baseline. Guided and free typing are evaluated
-              locally, and a new mission appears after every decision.
+              Complete one new check-in to compare this session with the saved
+              setup. Written text is evaluated locally and cleared, and a new
+              question appears after every decision.
             </p>
 
             <div class="challenge-meta">
               <div>
-                <span>Verification mission</span>
+                <span>Check-in question</span>
                 <strong id="verification-mission">Steady session</strong>
               </div>
               <div class="challenge-meta-status">
                 <span id="verification-text-status">Phrase waiting</span>
-                <span id="verification-free-status">Free typing waiting</span>
+                <span id="verification-free-status">Answer waiting</span>
                 <span id="verification-trail-status">Trail 0 of 6</span>
               </div>
             </div>
 
-            <div class="prompt-card" aria-label="Verification dispatch">
-              <span>Guided phrase</span>
+            <div class="prompt-card" aria-label="Verification reading prompt">
+              <span>Reading prompt</span>
               <strong id="verification-phrase">
                 A trusted session combines steady typing with smooth movement
               </strong>
@@ -515,7 +516,7 @@
 
             <form class="challenge-form" id="verification-form">
               <div class="field">
-                <label for="verification-input">Type the guided phrase</label>
+                <label for="verification-input">Type the reading prompt</label>
                 <input
                   id="verification-input"
                   name="verificationSample"
@@ -535,7 +536,7 @@
 
               <div class="field free-typing-field">
                 <div class="field-label-row">
-                  <label for="verification-free-input">Free typing</label>
+                  <label for="verification-free-input">Your answer</label>
                   <span>24 characters and 4 words</span>
                 </div>
                 <textarea
@@ -549,8 +550,8 @@
                   disabled
                 ></textarea>
                 <span class="field-help" id="verification-free-help">
-                  Write anything natural. Both typing fields stay in this
-                  browser and are cleared after the decision.
+                  Answer the check-in question without including private
+                  information. Both fields are cleared after the decision.
                 </span>
               </div>
 
@@ -560,9 +561,9 @@
               >
                 <div class="signal-trail-heading">
                   <div>
-                    <span>Pointer mini game</span>
+                    <span>Quick route</span>
                     <strong id="verification-trail-title">
-                      Follow the glowing signal
+                      Follow the highlighted points
                     </strong>
                   </div>
                   <small>Six targets complete the trail</small>
@@ -571,7 +572,7 @@
                   class="signal-board"
                   id="verification-board"
                   role="group"
-                  aria-label="Verification pointer trail"
+                  aria-label="Verification route board"
                 >
                   <button class="signal-target" type="button" data-slot="0"></button>
                   <button class="signal-target" type="button" data-slot="1"></button>
@@ -613,9 +614,9 @@
           <div class="trust-header">
             <div>
               <p class="panel-kicker">Session decision</p>
-              <h2 id="trust-title">Live trust</h2>
+              <h2 id="trust-title">Session outlook</h2>
             </div>
-            <span class="trust-state" id="trust-state">Not evaluated</span>
+            <span class="trust-state" id="trust-state">Pending</span>
           </div>
 
           <div class="score-row">
@@ -623,14 +624,14 @@
               <strong id="trust-score">0</strong>
               <span>/100</span>
             </div>
-            <p>Confidence that this interaction matches the active profile.</p>
+            <p>How closely this check matches the saved setup.</p>
           </div>
 
           <div class="trust-meter">
             <div
               class="trust-track"
               role="progressbar"
-              aria-label="Current trust score"
+              aria-label="Session match score"
               aria-valuemin="0"
               aria-valuemax="100"
               aria-valuenow="0"
@@ -638,9 +639,9 @@
               <span id="trust-fill"></span>
             </div>
             <div class="trust-scale" aria-hidden="true">
-              <span>Challenge</span>
+              <span>Block</span>
               <span>Review</span>
-              <span>Trusted</span>
+              <span>Continue</span>
             </div>
           </div>
 
@@ -651,51 +652,53 @@
             <div>
               <h3>Why this decision</h3>
               <p id="decision-reason">
-                Complete enrollment and a verification mission to
-                calculate trust.
+                Complete setup and one returning check to calculate a result.
               </p>
             </div>
           </div>
 
-          <section class="metrics" aria-labelledby="metrics-title">
-            <div class="section-heading">
-              <h3 id="metrics-title">Signal snapshot</h3>
-              <span>Current sample</span>
-            </div>
+          <details class="signal-disclosure">
+            <summary>Session indicators</summary>
+            <section class="metrics" aria-labelledby="metrics-title">
+              <div class="section-heading">
+                <h3 id="metrics-title">Current sample</h3>
+                <span>Aggregate values</span>
+              </div>
 
-            <dl class="metric-grid">
-              <div class="metric">
-                <dt>
-                  Key dwell
-                  <span>Average hold</span>
-                </dt>
-                <dd>
-                  <strong id="metric-dwell">0</strong>
-                  <small>ms</small>
-                </dd>
-              </div>
-              <div class="metric">
-                <dt>
-                  Key flight
-                  <span>Between keys</span>
-                </dt>
-                <dd>
-                  <strong id="metric-flight">0</strong>
-                  <small>ms</small>
-                </dd>
-              </div>
-              <div class="metric">
-                <dt>
-                  Pointer pace
-                  <span>Average speed</span>
-                </dt>
-                <dd>
-                  <strong id="metric-pointer">0</strong>
-                  <small>px/s</small>
-                </dd>
-              </div>
-            </dl>
-          </section>
+              <dl class="metric-grid">
+                <div class="metric">
+                  <dt>
+                    Key contact
+                    <span>Average hold</span>
+                  </dt>
+                  <dd>
+                    <strong id="metric-dwell">0</strong>
+                    <small>ms</small>
+                  </dd>
+                </div>
+                <div class="metric">
+                  <dt>
+                    Key interval
+                    <span>Between keys</span>
+                  </dt>
+                  <dd>
+                    <strong id="metric-flight">0</strong>
+                    <small>ms</small>
+                  </dd>
+                </div>
+                <div class="metric">
+                  <dt>
+                    Route pace
+                    <span>Average speed</span>
+                  </dt>
+                  <dd>
+                    <strong id="metric-pointer">0</strong>
+                    <small>px/s</small>
+                  </dd>
+                </div>
+              </dl>
+            </section>
+          </details>
 
           <section
             class="step-up-warning"
@@ -741,29 +744,47 @@
             </div>
           </section>
 
-          <div class="sensitive-action">
-            <div>
-              <span class="action-label">Protected account data</span>
-              <h3>Open security report</h3>
-              <p>View real profile and authorization details.</p>
+          <details class="technical-report-control">
+            <summary>Technical session details</summary>
+            <div class="sensitive-action">
+              <div>
+                <span class="action-label">Protected account data</span>
+                <h3>Prepare authenticated report</h3>
+                <p>
+                  Review aggregate keyboard, cursor, network, device, display,
+                  and account details.
+                </p>
+              </div>
+              <button
+                class="button button-action"
+                id="sensitive-action"
+                type="button"
+                disabled
+              >
+                Prepare report
+              </button>
             </div>
-            <button
-              class="button button-action"
-              id="sensitive-action"
-              type="button"
-              disabled
-            >
-              Generate report
-            </button>
-          </div>
 
-          <section
-            class="action-result"
-            id="action-result"
-            role="status"
-            aria-live="polite"
-            hidden
-          ></section>
+            <p
+              class="action-status"
+              id="action-status"
+              role="status"
+              aria-live="polite"
+              hidden
+            ></p>
+
+            <details
+              class="security-report"
+              id="security-report"
+              hidden
+            >
+              <summary>Detailed authenticated report</summary>
+              <section
+                class="action-result"
+                id="action-result"
+              ></section>
+            </details>
+          </details>
         </aside>
       </div>
 
@@ -773,6 +794,15 @@
         aria-labelledby="security-center-title"
         hidden
       >
+        <details class="security-center-disclosure">
+          <summary>
+            <span>
+              <strong>Account settings</strong>
+              <small>Devices, passkeys, recovery, and advanced controls</small>
+            </span>
+            <span aria-hidden="true">+</span>
+          </summary>
+          <div class="security-center-body">
         <div class="security-center-header">
           <div>
             <p class="eyebrow">
@@ -782,8 +812,7 @@
             <h2 id="security-center-title">Your security center</h2>
             <p>
               Signed in as <strong id="security-user"></strong>. Device and
-              behavioral signals are confidence inputs, not proof of a human
-              identity.
+              session and device checks provide context for server policy.
             </p>
           </div>
           <div class="capability-note">
@@ -800,12 +829,12 @@
             <div class="security-card-header">
               <div>
                 <p class="panel-kicker">Current browser</p>
-                <h3>Device descriptor</h3>
+                <h3>Browser details</h3>
               </div>
               <span class="security-card-index">D/01</span>
             </div>
             <p id="current-device-summary">
-              Collecting coarse device signals.
+              Collecting browser and display details.
             </p>
             <dl class="device-facts">
               <div>
@@ -834,7 +863,7 @@
               id="device-fingerprint-status"
               role="status"
             >
-              Optional local fingerprint adapter not checked.
+              Optional browser recognition not checked.
             </p>
             <div class="security-actions">
               <button
@@ -938,22 +967,22 @@
           <article class="security-card">
             <div class="security-card-header">
               <div>
-                <p class="panel-kicker">Signal quality</p>
-                <h3>Confidence and drift</h3>
+                <p class="panel-kicker">Check quality</p>
+                <h3>Session consistency</h3>
               </div>
               <span class="security-card-index">S/03</span>
             </div>
             <dl class="confidence-grid">
               <div>
-                <dt>Calibration</dt>
+                <dt>Setup quality</dt>
                 <dd id="calibration-value">Unavailable</dd>
               </div>
               <div>
-                <dt>Behavior drift</dt>
+                <dt>Change over time</dt>
                 <dd id="drift-value">Unavailable</dd>
               </div>
               <div>
-                <dt>Device confidence</dt>
+                <dt>Device status</dt>
                 <dd id="device-confidence-value">Unavailable</dd>
               </div>
             </dl>
@@ -970,15 +999,14 @@
                 <span>Non-authoritative</span>
               </div>
               <p id="explanation-text">
-                AI text can summarize signals, but it does not override the
-                measured score or server policy.
+                AI can summarize this report, but cannot change access.
               </p>
               <button
                 class="button button-quiet"
                 id="explanation-request"
                 type="button"
               >
-                Explain current signals
+                Explain this result
               </button>
               <p
                 class="compact-status"
@@ -1097,6 +1125,8 @@
             ></p>
           </form>
         </section>
+          </div>
+        </details>
       </section>
 
       <section class="prototype-note" aria-labelledby="prototype-title">
@@ -1104,17 +1134,16 @@
         <div>
           <h2 id="prototype-title">A focused local prototype</h2>
           <p>
-            Odysseus demonstrates behavioral scoring with a varied interaction
-            challenge and a small sample set. It is not a production identity
-            system and should not be the only control protecting a real
-            account.
+            Odysseus demonstrates an adaptive session check with a small sample
+            set. It is not a production identity system and should not be the
+            only control protecting a real account.
           </p>
         </div>
       </section>
     </main>
 
     <footer>
-      <span>Odysseus behavioral trust console</span>
+      <span>Odysseus account console</span>
       <span>Prototype build</span>
     </footer>
   </body>

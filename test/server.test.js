@@ -342,18 +342,21 @@ test("serves the secured browser entry point and rejects unauthenticated access"
   assert.equal(root.response.status, 200);
   assert.match(
     root.body,
-    /<title>Odysseus \| Behavioral Trust Console<\/title>/,
+    /<title>Odysseus \| Account Console<\/title>/,
   );
   assert.match(root.body, /id="auth-form"/);
   assert.match(root.body, /id="enrollment-board"/);
   assert.match(root.body, /id="enrollment-free-input"/);
   assert.match(root.body, /id="verification-free-input"/);
   assert.match(root.body, /records automatically/i);
-  assert.match(root.body, /does not prove human identity/i);
+  assert.match(root.body, /does not prove who a person is/i);
   assert.doesNotMatch(root.body, /displayed dispatch exactly/i);
   assert.match(root.body, /<script src="\/challenge\.js" defer><\/script>/);
   assert.match(root.body, /<script src="\/diagnostics\.js" defer><\/script>/);
+  assert.match(root.body, /<script src="\/session\.js" defer><\/script>/);
   assert.match(root.body, /<script src="\/app\.js" defer><\/script>/);
+  assert.match(root.body, /id="security-report"/);
+  assert.match(root.body, /id="action-status"/);
   assert.match(
     root.response.headers.get("content-security-policy"),
     /default-src 'self'/,
@@ -488,7 +491,7 @@ test("supports account registration, behavior grants, password step-up, audit, a
   assert.equal(behaviorAuthorized.body.authorizedBy, "behavior");
   assert.match(
     behaviorAuthorized.body.record.id,
-    /^ATH-ACCESS-\d{6}$/,
+    /^ODY-ACCESS-\d{6}$/,
   );
   assert.equal(
     behaviorAuthorized.body.record.title,
@@ -502,7 +505,20 @@ test("supports account registration, behavior grants, password step-up, audit, a
     behaviorAuthorized.body.record.authorization.method,
     "behavior",
   );
-  assert.equal(behaviorAuthorized.body.record.reportVersion, 3);
+  assert.equal(behaviorAuthorized.body.record.reportVersion, 4);
+  assert.equal(
+    behaviorAuthorized.body.record.session.behaviorGrantActive,
+    true,
+  );
+  assert.equal(
+    behaviorAuthorized.body.record.session.stepUpActive,
+    true,
+  );
+  assert.equal(
+    behaviorAuthorized.body.record.session.deviceBound,
+    false,
+  );
+  assert.equal(behaviorAuthorized.body.record.device, null);
   assert.equal(
     behaviorAuthorized.body.record.summary.posture,
     "Behavior matched",
@@ -607,6 +623,10 @@ test("supports account registration, behavior grants, password step-up, audit, a
     behaviorAuthorized.body.record.recentActivity.every(
       (event) => typeof event.ipAddress === "string",
     ),
+  );
+  assert.doesNotMatch(
+    JSON.stringify(behaviorAuthorized.body.record),
+    /tokenHash|fingerprintDigest|clientFingerprint|csrf|clientX|clientY|keyCode|typedText/,
   );
 
   const rejected = await client.request("/api/verify", {

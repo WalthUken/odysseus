@@ -334,7 +334,7 @@
         available: false,
         visitorId: null,
         confidence: null,
-        reason: "Optional local FingerprintJS adapter is not installed.",
+        reason: "Optional local browser recognition is not installed.",
       });
     }
     try {
@@ -351,14 +351,14 @@
             : null,
         reason: result && result.visitorId
           ? ""
-          : "The local fingerprint adapter returned no identifier.",
+          : "Local browser recognition returned no identifier.",
       });
     } catch (error) {
       return Object.freeze({
         available: false,
         visitorId: null,
         confidence: null,
-        reason: `Local fingerprint adapter unavailable: ${error.message}`,
+        reason: `Local browser recognition unavailable: ${error.message}`,
       });
     }
   }
@@ -374,7 +374,7 @@
     const resolved = new URL(source, global.location.origin);
     if (resolved.origin !== global.location.origin) {
       return Promise.reject(
-        new Error("Fingerprint adapter must be served from this origin.")
+        new Error("Browser recognition must be served from this origin.")
       );
     }
     if (!adapterLoadPromise) {

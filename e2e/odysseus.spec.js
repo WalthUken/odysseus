@@ -15,7 +15,7 @@ test("boots without browser errors", async ({ page }) => {
 
   await openOdysseus(page);
   await expect(page.getByRole("heading", {
-    name: "Trust that adapts to how you interact",
+    name: /A quieter way to check a session/i,
   })).toBeVisible();
   await expect(page.locator("#auth-status")).not.toContainText("unavailable", {
     ignoreCase: true,
@@ -76,7 +76,7 @@ test("accepts the guided phrase only after the final character", async ({
   await registerAccount(page, testInfo, "guided");
 
   const guided = page.locator("#enrollment-input");
-  const freeTyping = page.getByLabel("Free typing").first();
+  const freeTyping = page.getByLabel("Your answer").first();
   const phrase = (await page.locator("#enrollment-phrase").innerText()).trim();
 
   await guided.pressSequentially(phrase.slice(0, -1), { delay: 2 });
@@ -99,17 +99,17 @@ test("provides a usable free typing diagnostic", async ({
   await openOdysseus(page);
   await registerAccount(page, testInfo, "free_typing");
 
-  const freeTyping = page.getByLabel("Free typing").first();
+  const freeTyping = page.getByLabel("Your answer").first();
   await expect(freeTyping).toBeEnabled();
   await expect(page.locator("#enrollment-free-help")).toContainText(
-    "Write anything natural"
+    "Answer the check-in question"
   );
 
   await freeTyping.pressSequentially("four calm words written freely", {
     delay: 2,
   });
   await expect(page.locator("#enrollment-free-status")).toHaveText(
-    "Free typing ready"
+    "Answer ready"
   );
 });
 
@@ -124,6 +124,7 @@ test("registers and lists the current device", async ({
   );
   await expect(page.locator("#device-kind")).not.toHaveText("Unavailable");
 
+  await page.locator("#security-center > details > summary").click();
   const responsePromise = page.waitForResponse((response) => (
     response.url().endsWith("/api/devices")
     && response.request().method() === "POST"
@@ -164,8 +165,9 @@ test("handles disabled external providers without breaking local auth", async ({
 
   await expect(page.locator("#turnstile-container")).toBeHidden();
   await registerAccount(page, testInfo, "providers_off");
+  await page.locator("#security-center > details > summary").click();
   await page.getByRole("button", {
-    name: "Explain current signals",
+    name: "Explain this result",
   }).click();
 
   await expect(page.locator("#explanation-status")).toContainText(

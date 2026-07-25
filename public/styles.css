@@ -1184,7 +1184,38 @@ main {
 }
 
 .metrics {
-  margin-top: 1.7rem;
+  margin-top: 0.9rem;
+}
+
+.signal-disclosure,
+.technical-report-control {
+  margin-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.signal-disclosure > summary,
+.technical-report-control > summary,
+.security-report > summary {
+  padding: 0.9rem 0;
+  cursor: pointer;
+  color: var(--ink-soft);
+  font-size: 0.7rem;
+  font-weight: 750;
+  list-style-position: inside;
+}
+
+.signal-disclosure > summary:hover,
+.technical-report-control > summary:hover,
+.security-report > summary:hover {
+  color: var(--green-dark);
+}
+
+.signal-disclosure > summary:focus-visible,
+.technical-report-control > summary:focus-visible,
+.security-report > summary:focus-visible,
+.security-center-disclosure > summary:focus-visible {
+  outline: 3px solid rgba(19, 107, 79, 0.25);
+  outline-offset: 4px;
 }
 
 .section-heading {
@@ -1412,8 +1443,37 @@ main {
   color: var(--green-dark);
 }
 
-.action-result[hidden] {
+.action-status[hidden],
+.security-report[hidden] {
   display: none;
+}
+
+.action-status {
+  min-height: 1.1rem;
+  margin: 0.8rem 0 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.action-status[data-state="ready"] {
+  color: var(--green-dark);
+}
+
+.action-status[data-state="working"] {
+  color: var(--amber);
+}
+
+.action-status[data-state="error"] {
+  color: var(--red);
+}
+
+.security-report {
+  margin-top: 0.75rem;
+  border-top: 1px solid var(--line);
+}
+
+.security-report > summary {
+  color: var(--green-dark);
 }
 
 .action-result[data-state="ready"] {
@@ -1850,11 +1910,75 @@ main {
 }
 
 .security-center {
-  margin-top: clamp(3rem, 7vw, 6rem);
+  margin-top: 1rem;
 }
 
 .security-center[hidden] {
   display: none;
+}
+
+.security-center-disclosure {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 254, 250, 0.76);
+}
+
+.security-center-disclosure > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 76px;
+  padding: 1rem 1.25rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.security-center-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.security-center-disclosure > summary > span:first-child {
+  display: flex;
+  flex-direction: column;
+}
+
+.security-center-disclosure > summary strong {
+  font-size: 0.88rem;
+}
+
+.security-center-disclosure > summary small {
+  margin-top: 0.15rem;
+  color: var(--ink-soft);
+  font-size: 0.7rem;
+}
+
+.security-center-disclosure > summary > span:last-child {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  transition: transform 160ms ease;
+}
+
+.security-center-disclosure[open] > summary > span:last-child {
+  transform: rotate(45deg);
+}
+
+.security-center-body {
+  padding: 1.25rem;
+  border-top: 1px solid var(--line);
+}
+
+.score-value,
+.metric dd,
+.security-report-statistic dd,
+.device-facts dd,
+.confidence-grid dd,
+.admin-metrics dd {
+  font-variant-numeric: tabular-nums;
 }
 
 .security-center-header {

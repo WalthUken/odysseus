@@ -11,7 +11,7 @@ const {
 } = require("./provider-utils");
 
 const GEMINI_API_ROOT =
-  "https://generativelanguage.googleapis.com/v1beta/models";
+  "https://generativelanguage.googleapis.com/v1beta/interactions";
 const MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const FEATURE_PATTERN = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
 const REASON_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/;
@@ -193,7 +193,7 @@ function explanationProse(explanation) {
 class GeminiExplanationAdapter {
   constructor(options = {}) {
     this.apiKey = options.apiKey || null;
-    this.model = String(options.model ?? "gemini-2.5-flash");
+    this.model = String(options.model ?? "gemini-3.6-flash");
     this.fetchImpl = options.fetchImpl;
     this.timeoutMs = Number(options.timeoutMs ?? 5_000);
     this.monitoring = options.monitoring;
@@ -244,29 +244,24 @@ class GeminiExplanationAdapter {
       };
     }
     const requestBody = {
-      systemInstruction: {
-        parts: [
-          {
-            text: [
-              "Explain the supplied behavioral authentication report.",
-              "Use neutral language and do not infer identity or intent.",
-              "Do not make, change, or recommend an authorization decision.",
-              "Return only the JSON object required by the response schema.",
-            ].join(" "),
-          },
-        ],
+      model: this.model,
+      input: JSON.stringify(validated),
+      system_instruction: [
+        "Explain the supplied behavioral authentication report.",
+        "Use neutral language and do not infer identity or intent.",
+        "Do not make, change, or recommend an authorization decision.",
+        "Return only the JSON object required by the response schema.",
+      ].join(" "),
+      response_format: {
+        type: "text",
+        mime_type: "application/json",
+        schema: EXPLANATION_SCHEMA,
       },
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: JSON.stringify(validated) }],
-        },
-      ],
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: EXPLANATION_SCHEMA,
-        temperature: 0.2,
-        maxOutputTokens: 600,
+      store: false,
+      background: false,
+      generation_config: {
+        max_output_tokens: 600,
+        thinking_level: "minimal",
       },
     };
 
@@ -274,9 +269,7 @@ class GeminiExplanationAdapter {
     try {
       const response = await fetchJson({
         fetchImpl: this.fetchImpl,
-        url: `${GEMINI_API_ROOT}/${encodeURIComponent(
-          this.model
-        )}:generateContent`,
+        url: GEMINI_API_ROOT,
         headers: {
           "Content-Type": "application/json",
           "x-goog-api-key": this.apiKey,
@@ -286,14 +279,17 @@ class GeminiExplanationAdapter {
         maximumBytes: 256 * 1_024,
         signal: options.signal,
       });
-      const text =
-        response
-        && Array.isArray(response.candidates)
-        && response.candidates[0]
-        && response.candidates[0].content
-        && Array.isArray(response.candidates[0].content.parts)
-        && response.candidates[0].content.parts[0]
-        && response.candidates[0].content.parts[0].text;
+      const modelOutput = response
+        && Array.isArray(response.steps)
+        && [...response.steps]
+          .reverse()
+          .find((step) => step && step.type === "model_output");
+      const textPart = modelOutput
+        && Array.isArray(modelOutput.content)
+        && modelOutput.content.find(
+          (part) => part && part.type === "text"
+        );
+      const text = textPart && textPart.text;
       if (typeof text !== "string" || text.length > 16_000) {
         throw new ProviderInputError(
           "Gemini response did not contain structured text.",

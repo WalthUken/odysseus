@@ -113,6 +113,9 @@ function makeContext(overrides = {}) {
     async getUserByUsername() {
       return null;
     },
+    async listAudit() {
+      return [];
+    },
     async listSecurityNotifications() {
       return [];
     },
@@ -714,8 +717,6 @@ test("returns a deliberate provider-disabled response without accepting raw data
     },
     body: {
       profileId: "profile_test",
-      trustScore: 72,
-      context: "account_security_summary",
     },
   };
 
@@ -729,7 +730,7 @@ test("returns a deliberate provider-disabled response without accepting raw data
   assert.equal(calls.audits[0].reasonCode, "GEMINI_DISABLED");
   assert.doesNotMatch(
     JSON.stringify(calls.audits),
-    /profile_test|72/,
+    /profile_test/,
   );
 
   request.body.rawSignals = [1, 2, 3];
@@ -740,4 +741,102 @@ test("returns a deliberate provider-disabled response without accepting raw data
       && error.code === "UNEXPECTED_REQUEST_FIELDS"
     ),
   );
+});
+
+test("sends only a trusted aggregate report to advisory Gemini", async () => {
+  const reports = [];
+  const app = new FakeApp();
+  const { calls, context } = makeContext({
+    database: {
+      async listAudit() {
+        return [{
+          id: 44,
+          eventType: "behavior.verify",
+          metadata: {
+            profileId: "profile_test",
+            decision: "step_up",
+            trustPercent: 58,
+            normalizedDistance: 2.4,
+            acceptanceThreshold: 1.5,
+            reasonCodes: ["BEHAVIOR_DRIFT"],
+            featureDeltas: [
+              { name: "dwellMean", normalizedDelta: 2.1 },
+              { name: "flightMean", normalizedDelta: -1.2 },
+              {
+                name: "prompt_fragment_private_value",
+                normalizedDelta: 99,
+              },
+            ],
+            behaviorDiagnostics: {
+              typedText: "must-not-leave-the-server",
+            },
+          },
+        }];
+      },
+    },
+    geminiProvider: {
+      readiness() {
+        return { ready: true, disabled: false };
+      },
+      async explain(report) {
+        reports.push(report);
+        return {
+          generated: true,
+          prose: "AI-generated explanation: Session variation",
+          explanation: {
+            headline: "Session variation",
+            summary: "Aggregate timing changed.",
+            observations: ["Key timing is different."],
+            nextStep: "Run another account check.",
+          },
+          model: "gemini-test",
+        };
+      },
+    },
+  });
+  registerAccountManagementRoutes(app, context);
+  const response = responseRecorder();
+
+  await finalHandler(app, "POST", "/api/explanations")({
+    auth: {
+      user: { id: 2 },
+      session: { id: 3 },
+    },
+    body: {
+      profileId: "profile_test",
+    },
+  }, response);
+
+  assert.equal(reports.length, 1);
+  assert.deepEqual(reports[0].assessment, {
+    decision: "step_up",
+    trustPercent: 50,
+    normalizedDistance: 1.5,
+    acceptanceThreshold: 1,
+    reasonCodes: ["BEHAVIOR_DRIFT"],
+  });
+  assert.deepEqual(reports[0].signals, [
+    {
+      name: "dwellMean",
+      direction: "higher",
+      deviationRatio: 2,
+    },
+    {
+      name: "flightMean",
+      direction: "lower",
+      deviationRatio: 1,
+    },
+  ]);
+  assert.doesNotMatch(
+    JSON.stringify(reports),
+    /must-not-leave-the-server|profile_test|prompt_fragment|99|ipAddress|fingerprint|token|clientX|keyCode/,
+  );
+  assert.equal(response.payload.advisoryOnly, true);
+  assert.equal(response.payload.authorizationDecision, null);
+  assert.equal(calls.audits.at(-1).outcome, "success");
+  assert.deepEqual(calls.audits.at(-1).metadata, {
+    provider: "gemini",
+    advisoryOnly: true,
+    sourceEventId: 44,
+  });
 });
