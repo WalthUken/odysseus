@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - OptionsFlow</title>
+    <meta name="description" content="Login to OptionsFlow stock options platform">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="login-container">
+        <div class="glass-panel login-card">
+            <div id="step-1">
+                <div class="login-header">
+                    <h1>OptionsFlow</h1>
+                    <p>Enter your credentials to access your terminal</p>
+                </div>
+                
+                <div id="login-error">Invalid username or password</div>
+
+                <form id="login-form">
+                    <div class="input-group">
+                        <input type="text" id="username" placeholder=" " required autocomplete="off">
+                        <label for="username">Username</label>
+                    </div>
+                    
+                    <div class="input-group">
+                        <input type="password" id="password" placeholder=" " required>
+                        <label for="password">Password</label>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">
+                        Sign In
+                    </button>
+                </form>
+            </div>
+
+            <div id="step-2" style="display: none;">
+                <div class="login-header">
+                    <h1>Security Questions</h1>
+                    <p>Please verify your identity to proceed</p>
+                </div>
+
+                <form id="security-form">
+                    <div class="input-group">
+                        <input type="text" id="maiden-name" placeholder=" " required>
+                        <label for="maiden-name">What's your mother's maiden name?</label>
+                    </div>
+                    
+                    <div class="input-group">
+                        <input type="text" id="highschool" placeholder=" " required>
+                        <label for="highschool">What was your first highschool?</label>
+                    </div>
+                    
+                    <div class="input-group">
+                        <input type="text" id="pet" placeholder=" " required>
+                        <label for="pet">What was the name of your first pet?</label>
+                    </div>
+
+                    <div class="input-group">
+                        <label style="position: static; margin-bottom: 0.8rem; display: block; color: var(--text-secondary); font-size: 0.875rem;">What is your sex?</label>
+                        <div style="display: flex; gap: 1.5rem; color: var(--text-primary); font-size: 0.95rem; margin-top: 0.5rem;">
+                            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                                <input type="radio" name="sex" value="male" required style="width: auto; margin: 0; padding: 0; box-shadow: none;"> Male
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                                <input type="radio" name="sex" value="female" required style="width: auto; margin: 0; padding: 0; box-shadow: none;"> Female
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                                <input type="radio" name="sex" value="other" required style="width: auto; margin: 0; padding: 0; box-shadow: none;"> Other
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">
+                        Verify & Access Terminal
+                    </button>
+                </form>
+            </div>
+            
+            <div style="margin-top: 2rem; text-align: center; font-size: 0.85rem; color: var(--text-secondary);">
+                <p>Demo credentials:<br>Username: <strong>username</strong> | Password: <strong>password</strong></p>
+            </div>
+        </div>
+    </div>
+    <script src="login.js"></script>
+</body>
+</html>
