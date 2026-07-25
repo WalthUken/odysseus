@@ -70,10 +70,18 @@ function initBehaviorRecorder(username) {
         return;
     }
 
-    const collector = window.BehaviorCollector.create();
+    // Resume the recording started on the security questions, if there is one.
+    const carried = window.BehaviorCollector.take();
+    const collector = window.BehaviorCollector.create(carried);
     collector.start(document);
 
     const status = document.getElementById('behavior-status');
+    if (carried) {
+        const origin = document.getElementById('behavior-origin');
+        if (origin) {
+            origin.hidden = false;
+        }
+    }
     const baselineBtn = document.getElementById('extract-baseline');
     const sampleBtn = document.getElementById('extract-sample');
 

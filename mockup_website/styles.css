@@ -703,3 +703,7 @@ tr:hover td {
 .diff-muted {
   color: var(--text-secondary);
 }
+
+.behavior-carried {
+  color: var(--accent-color);
+}

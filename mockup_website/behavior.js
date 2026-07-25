@@ -75,28 +75,64 @@
         };
     }
 
-    function createCollector() {
+    function restoreAccumulator(saved) {
+        const acc = accumulator();
+        if (!saved || typeof saved !== 'object') {
+            return acc;
+        }
+        acc.count = Number(saved.count) || 0;
+        acc.mean = Number(saved.mean) || 0;
+        acc.m2 = Number(saved.m2) || 0;
+        acc.min = Number.isFinite(saved.min) ? saved.min : Infinity;
+        acc.max = Number.isFinite(saved.max) ? saved.max : -Infinity;
+        acc.sample = Array.isArray(saved.sample)
+            ? saved.sample.filter(Number.isFinite).slice(0, SAMPLE_CAP)
+            : [];
+        return acc;
+    }
+
+    // `carry` resumes a session recorded on an earlier page. Event timestamps
+    // are relative to their own page, so only totals and accumulators cross
+    // over; the "last event" markers restart to avoid inventing an interval
+    // that spans the navigation.
+    function createCollector(carry) {
+        const resumed = carry && typeof carry === 'object' ? carry : null;
         const state = {
-            startedAt: Date.now(),
+            startedAt: resumed && Number.isFinite(resumed.startedAt)
+                ? resumed.startedAt
+                : Date.now(),
             pendingKeys: new Map(),
-            keyCount: 0,
+            keyCount: resumed ? Number(resumed.keyCount) || 0 : 0,
+            carriedTypingSpanMs: resumed
+                ? Number(resumed.typingSpanMs) || 0
+                : 0,
             firstKeyAt: null,
             lastKeyAt: null,
             lastKeyUpAt: null,
-            dwell: accumulator(),
-            flight: accumulator(),
-            downDown: accumulator(),
-            moveCount: 0,
-            totalDistance: 0,
-            activeMoveMs: 0,
-            directionChanges: 0,
+            dwell: restoreAccumulator(resumed?.dwell),
+            flight: restoreAccumulator(resumed?.flight),
+            downDown: restoreAccumulator(resumed?.downDown),
+            moveCount: resumed ? Number(resumed.moveCount) || 0 : 0,
+            totalDistance: resumed ? Number(resumed.totalDistance) || 0 : 0,
+            activeMoveMs: resumed ? Number(resumed.activeMoveMs) || 0 : 0,
+            directionChanges: resumed
+                ? Number(resumed.directionChanges) || 0
+                : 0,
             lastMove: null,
             lastVector: null,
-            speed: accumulator(),
-            clicks: 0,
+            speed: restoreAccumulator(resumed?.speed),
+            clicks: resumed ? Number(resumed.clicks) || 0 : 0,
             lastClickAt: null,
-            clickInterval: accumulator()
+            clickInterval: restoreAccumulator(resumed?.clickInterval)
         };
+
+        function typingSpanMs() {
+            const currentPage =
+                state.firstKeyAt !== null && state.lastKeyAt !== null
+                    ? state.lastKeyAt - state.firstKeyAt
+                    : 0;
+            return state.carriedTypingSpanMs + currentPage;
+        }
 
         function onKeyDown(event) {
             if (event.repeat) {
@@ -173,10 +209,7 @@
 
         function metrics() {
             const sessionMs = Date.now() - state.startedAt;
-            const typingSpanMs =
-                state.firstKeyAt !== null && state.lastKeyAt !== null
-                    ? state.lastKeyAt - state.firstKeyAt
-                    : 0;
+            const spanMs = typingSpanMs();
             const activeMoveSeconds = state.activeMoveMs / 1000;
 
             return {
@@ -184,10 +217,10 @@
                 sessionDurationMs: sessionMs,
                 keyboard: {
                     keystrokes: state.keyCount,
-                    typingSpanMs: round(typingSpanMs),
+                    typingSpanMs: round(spanMs),
                     keysPerSecond:
-                        typingSpanMs > 0 && state.keyCount > 1
-                            ? round(((state.keyCount - 1) / typingSpanMs) * 1000, 3)
+                        spanMs > 0 && state.keyCount > 1
+                            ? round(((state.keyCount - 1) / spanMs) * 1000, 3)
                             : null,
                     holdMs: summarize(state.dwell),
                     flightMs: summarize(state.flight),
@@ -209,6 +242,25 @@
             };
         }
 
+        // Everything needed to resume this session on the next page.
+        function snapshot() {
+            return {
+                startedAt: state.startedAt,
+                keyCount: state.keyCount,
+                typingSpanMs: typingSpanMs(),
+                dwell: state.dwell,
+                flight: state.flight,
+                downDown: state.downDown,
+                moveCount: state.moveCount,
+                totalDistance: state.totalDistance,
+                activeMoveMs: state.activeMoveMs,
+                directionChanges: state.directionChanges,
+                speed: state.speed,
+                clicks: state.clicks,
+                clickInterval: state.clickInterval
+            };
+        }
+
         function start(target = document) {
             target.addEventListener('keydown', onKeyDown, true);
             target.addEventListener('keyup', onKeyUp, true);
@@ -216,8 +268,41 @@
             target.addEventListener('click', onClick, true);
         }
 
-        return { start, metrics, startedAt: state.startedAt };
+        return { start, metrics, snapshot, startedAt: state.startedAt };
     }
 
-    global.BehaviorCollector = { create: createCollector };
+    const CARRY_KEY = 'behavior_carry';
+
+    // sessionStorage keeps the handover inside this tab and clears itself when
+    // the tab closes.
+    function save(collector) {
+        try {
+            sessionStorage.setItem(
+                CARRY_KEY,
+                JSON.stringify(collector.snapshot())
+            );
+        } catch (_error) {
+            // A full or blocked store just means the session starts fresh.
+        }
+    }
+
+    function take() {
+        try {
+            const raw = sessionStorage.getItem(CARRY_KEY);
+            sessionStorage.removeItem(CARRY_KEY);
+            return raw ? JSON.parse(raw) : null;
+        } catch (_error) {
+            return null;
+        }
+    }
+
+    function clear() {
+        try {
+            sessionStorage.removeItem(CARRY_KEY);
+        } catch (_error) {
+            // Nothing to clear.
+        }
+    }
+
+    global.BehaviorCollector = { create: createCollector, save, take, clear };
 })(window);

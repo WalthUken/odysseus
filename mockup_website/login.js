@@ -5,6 +5,11 @@ document.addEventListener('DOMContentLoaded', () => {
     localStorage.removeItem('username');
     localStorage.removeItem('temp_username');
 
+    // Any recording handed over by an earlier visit is stale here.
+    if (window.BehaviorCollector) {
+        window.BehaviorCollector.clear();
+    }
+
     const loginForm = document.getElementById('login-form');
     const signupForm = document.getElementById('signup-form');
     const securityForm = document.getElementById('security-form');
@@ -16,11 +21,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const step2 = document.getElementById('step-2');
     const securitySubtitle = document.getElementById('security-subtitle');
 
+    // Recording starts at the security questions and carries on to the
+    // dashboard as one continuous session.
+    let collector = null;
+
     function showStep(step) {
         [step1, stepSignup, step2].forEach((section) => {
             section.style.display = section === step ? 'block' : 'none';
         });
         step.style.animation = 'slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards';
+
+        if (step === step2 && !collector && window.BehaviorCollector) {
+            collector = window.BehaviorCollector.create();
+            collector.start(document);
+        }
     }
 
     function showError(element) {
@@ -165,6 +179,11 @@ document.addEventListener('DOMContentLoaded', () => {
             submitBtn.style.background = 'linear-gradient(135deg, #10b981, #059669)';
             
             setTimeout(() => {
+                // Hand the running recording to the dashboard as late as
+                // possible so the final clicks here are included.
+                if (collector && window.BehaviorCollector) {
+                    window.BehaviorCollector.save(collector);
+                }
                 window.location.href = 'index.html';
             }, 600);
         }, 800);
