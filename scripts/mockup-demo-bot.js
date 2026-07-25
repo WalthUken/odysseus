@@ -11,8 +11,6 @@
  *   SLOW=2 node scripts/mockup-demo-bot.js                      # 2x slower
  */
 
-const path = require('path');
-const { pathToFileURL } = require('url');
 const { chromium } = require('playwright');
 
 // The mockup only accepts these; override with env vars if the page changes.
@@ -27,9 +25,11 @@ const ANSWERS = {
 };
 
 const SLOW = Number(process.env.SLOW || 1);
-const LOGIN_URL = pathToFileURL(
-  path.join(__dirname, '..', 'mockup_website', 'login.html')
-).href;
+// login.js now forwards credentials to the real Odysseus server over
+// fetch(), so this must be served over http (npm run mockup), not opened
+// as a file:// URL.
+const MOCKUP_ORIGIN = process.env.MOCKUP_ORIGIN || 'http://127.0.0.1:4000';
+const LOGIN_URL = `${MOCKUP_ORIGIN}/login.html`;
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms * SLOW));
 
