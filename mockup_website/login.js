@@ -703,7 +703,9 @@ function boundedEvidenceCounts(counts) {
 function startAuthEvidence(usernameInput, passwordInput) {
     let collector = null;
     try {
-        collector = createAuthBehaviorCollector({
+        // Use the shared collector from telemetry.js (loaded in login.html).
+        // This ensures both the login page and dashboard emit identical feature names and semantics.
+        collector = window.OdysseusTelemetry.createCollector({
             keyboardTarget: document,
             pointerTarget: document,
             // Listen at the document level and narrow to the sign-in fields, so

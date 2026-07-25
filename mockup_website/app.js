@@ -1302,7 +1302,9 @@ function runTelemetry() {
     // The order-entry inputs are the keyboard source (backend bot detection
     // is keyboard-weighted). Listen at the document level and filter to the
     // two inputs so search-bar typing is never captured.
-    const collector = createBehaviorCollector({
+    // Use the shared collector from telemetry.js (loaded in index.html).
+    // This ensures both the mockup and console emit identical feature names and semantics.
+    const collector = window.OdysseusTelemetry.createCollector({
         keyboardTarget: document,
         pointerTarget: document,
         shouldCaptureKeyboard: event => {
