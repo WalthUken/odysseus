@@ -22,16 +22,22 @@ real authorization factors.
 
 The local demo now supports:
 
-- The new dark market-terminal frontend with separate dashboard, session, and
-  account-security views
+- The OptionsFlow mockup site on port 4000, which is the realistic demo
+  surface: sign-in lands straight on the trading dashboard and telemetry is
+  collected passively from the order ticket and from pointer movement
+- The dark market-terminal console on port 3000 with separate dashboard,
+  session, and account-security views
 - Human A enrollment as Report 1
 - Human A returning-session comparisons
 - Human B returning-session comparisons
 - An Automated agent comparison label
-- Separate similarity and automation-risk results
+- Separate similarity and automation-risk results, visible only in the local
+  report viewer
 - A local `/admin` report that shows baseline centers, variation, scales,
   thresholds, comparisons, and audit outcomes
-- Account-name plus local admin-code access to that report
+- Account-name plus that account's own password as access to that report,
+  with `ODYSSEUS_DEMO_ADMIN_BYPASS` acting only as the on/off switch that
+  decides whether the viewer is served at all
 - A local `/admin/test` flow that can strengthen Human A's active demo
   fingerprint from three trusted, matching samples
 - Credential-burst and password-spray limiting with explicit automation flags
@@ -40,11 +46,25 @@ The local demo now supports:
 The subject label is display and evaluation metadata only. It never changes a
 score, threshold, grant, or authorization decision.
 
+### Disclosure boundary
+
+No behavioral output reaches a user anywhere in either front end. No trust
+score, decision, reason code, automation verdict, similarity result, or
+profiling progress is rendered. A behavioral refusal is presented as an
+ordinary, unexplained sign-in failure, and the simulated network-restriction
+notice has been retired rather than reworded. Every statement in this document
+about what a person "sees" or "reviews" therefore means the local `/admin`
+report viewer, never the application UI. `e2e/odysseus.spec.js` enforces this:
+apart from a single status line, the rendered page after a behavioral denial is
+compared byte for byte against the page after a wrong password.
+
 ## Current operational status
 
 | Component | Current status | Security role |
 | --- | --- | --- |
-| New market-terminal frontend | Working | Current demo interface for all account and session flows |
+| OptionsFlow mockup site (port 4000) | Working | Realistic demo surface; forwards every account action to Odysseus server-to-server |
+| Market-terminal console (port 3000) | Working | Engineering interface for all account and session flows |
+| Passive telemetry collection | Working | Silent order-ticket keystroke and page-wide pointer capture |
 | Password authentication | Working | Primary account factor |
 | Passkeys | Implemented | Strong account factor |
 | Behavioral baseline | Working | Secondary identity-similarity signal |
@@ -54,26 +74,53 @@ score, threshold, grant, or authorization decision.
 | Credential burst defense | Working | Blocks fast password attacks and records bot-risk flags |
 | Local `/admin` report | Working when configured | Local demo inspection only |
 | Local `/admin/test` report | Working when configured | Three-sample Human A comparison with guarded, bounded baseline strengthening |
-| Gemini explanation | Code path works, provider returns HTTP 401 | Advisory explanation only |
-| Hugging Face anomaly adapter | Implemented but disabled and not invoked | Future shadow experiment |
+| Gemini explanation | Endpoint correct, code path works, key returns HTTP 401; UI control now hidden | Advisory explanation only |
+| Hugging Face anomaly adapter | Wired for readiness only; `analyze()` has no call sites and never runs | None today |
 | Turnstile | Not configured | Optional server-validated human assurance |
 | Redis | Not configured | Needed for shared multi-instance limits |
 | PostgreSQL | Contract only | Production persistence with forced RLS |
 
 ## Demo protocol
 
+Both servers must be running for any of this: `npm start` for Odysseus on port
+3000 and `npm run mockup` for OptionsFlow on port 4000. The mockup holds no
+accounts and returns "The account service is not running" if Odysseus is down.
+
 ### Human A enrollment and repeat
 
-1. Start Odysseus and open `/`.
-2. Create an account. `test06` is acceptable only as a local demo password.
-3. Leave the subject label on `Human A`.
-4. Complete five enrollment rounds. These create the active behavioral
-   baseline, shown as Report 1 in the local admin viewer.
-5. Complete a returning-session check with `Human A` still selected.
-6. Review identity similarity and automation risk as separate results.
+There are two routes to a baseline. The passive one is the realistic demo.
+
+Passive route, on the mockup at `http://127.0.0.1:4000`:
+
+1. Sign in, or create an account. Recovery questions at signup are optional.
+2. Sign-in lands directly on the trading dashboard; nothing gates it.
+3. Use the site normally. Open a ticker card and fill the order ticket's
+   quantity and limit fields — those two inputs are the only keyboard source,
+   and pointer movement is captured page-wide.
+4. A sample is attempted every 1.5 seconds and uploaded once enough
+   observations exist. The first five complete samples enroll the baseline;
+   later samples are compared against it.
+5. Nothing on screen changes at any point. Open `/admin` on the Odysseus
+   origin to read the result.
+
+Guided route, on the console at `http://127.0.0.1:3000`:
+
+1. Create an account. `test06` is acceptable only as a local demo password.
+2. Sign-in opens the security-questions view. Complete its five setup rounds;
+   they create the active baseline, shown as Report 1 in the local viewer.
+3. The dashboard opens once the rounds are saved, and telemetry continues
+   passively from there.
+4. Open `/admin` to review identity similarity and automation risk as separate
+   results. The console itself shows neither.
 
 This is the Human A versus Human A repeat test. Run it across multiple sessions,
 days, devices, and conditions to measure normal within-person variation.
+
+A note on what the passive route actually exercises: a session spent only
+moving and clicking produces a pointer-only vector, and pointer features
+separate people far more weakly than key timing does. Demo runs that skip the
+order ticket will look inconclusive for reasons that have nothing to do with
+who was at the keyboard.
 
 Once an account has Report 1, a later password login must include fresh
 behavior evidence. A close Human A repeat with human-like automation evidence
@@ -90,10 +137,12 @@ must be allowed to reach enrollment.
    repeat.
 
 A sufficiently different Human B interaction is classified as
-`suspicious_identity`. The demo does not create an authenticated session and
-shows a simulated network restriction warning. The warning must say that it is
-simulated. Its contract is `displayed: true` and `enforced: false`. No firewall,
-router, operating-system, proxy, database, or real IP block is changed.
+`suspicious_identity` and no authenticated session is created. Human B sees
+only a generic sign-in failure — the same one a typo produces. The simulated
+network-restriction warning that this demo used to display is retired: the
+server may still emit `simulatedIpRestriction` with `displayed: true` and
+`enforced: false`, but no front end renders it. No firewall, router,
+operating-system, proxy, database, or real IP block was ever changed.
 
 Sharing one account credential is acceptable only for this controlled local
 experiment. It is not an acceptable production test design. A production study
@@ -179,12 +228,13 @@ The intended local demo lifecycle is:
 8. A close repeat becomes a bounded reinforcement candidate only after the
    password is valid, the evidence is sufficient, identity similarity allows
    it, and automation risk is human-like.
-9. Human B is treated as suspicious identity, receives no session, and sees a
-   simulated-only restriction warning.
+9. Human B is treated as suspicious identity and receives no session. Nothing
+   explains why; the refusal is the generic one.
 10. An automated interaction is denied, receives no session, and cannot
-    become training data.
+    become training data. It is likewise given no explanation.
 11. `/admin` exposes a redacted account report after local account-name and
-    admin-code authorization.
+    account-password authorization, and only while
+    `ODYSSEUS_DEMO_ADMIN_BYPASS` is set on a non-production, loopback host.
 
 The password answers "does the caller know the account credential?" Identity
 similarity answers "does this interaction resemble the saved account
@@ -199,12 +249,16 @@ two.
 | Missing on a new account | Not available | Not available | Continue to enrollment | No amendment |
 | Present, evidence missing | Not evaluated | Insufficient evidence | Review, no session | No amendment |
 | Present | Close | Human-like | Allow | Pending or bounded trusted reinforcement |
-| Present | Different | Human-like | Suspicious warning, no session | No amendment |
+| Present | Different | Human-like | Denied, no session | No amendment |
 | Present | Close or different | Automation likely | Deny, no session | No amendment |
 | Present | Any uncertain combination | Elevated or insufficient | Review, no session | No amendment |
 
 `review` is fail-closed for session creation in this demo. It is not a silent
 allow.
+
+Every row that does not produce a session is presented identically to the
+person in front of the browser. The distinctions in this table exist in the
+audit record and in the `/admin` report, not on screen.
 
 ### Thresholds and bounds
 
@@ -275,10 +329,12 @@ single-use consumption, and duplicate-evidence detection.
 
 ### Demo and production boundary
 
-The simulated network restriction is a presentation-only warning. It does not
-ban an address. The shared local admin code, cohort selector, in-place active
-template amendment, and direct sharing of Person A's credentials with Person B
-are also demo mechanisms. They are not production security designs.
+The simulated network restriction never banned an address, and it is no longer
+displayed at all. The local report viewer's account-password authorization,
+the cohort selector, in-place active template amendment, and direct sharing of
+Person A's credentials with Person B are also demo mechanisms. They are not
+production security designs: account-password access to `/admin` grants the
+full record dump to anyone holding that password on this machine.
 
 Production needs immutable template versions, quarantined candidates,
 promotion and rollback, user notification, formal review, calibrated cohort
@@ -314,15 +370,62 @@ Lower normalized distance means closer to the baseline. The trust percentage is
 a monotonic presentation of that distance. It is not a statistical probability
 that the person is Human A.
 
+### Feature inventory
+
+`public/telemetry.js` emits twenty values.
+
+Six timing families, each a mean and a mean absolute deviation: key hold
+(dwell), flight from one release to the next press, key interval (down-down),
+pointer velocity, pointer acceleration, and pointer direction change.
+
+Two burst-structure values from inter-keydown gaps alone: the share of gaps
+that are thinking pauses rather than in-burst typing, and the mean in-burst
+gap. A gap of 500 ms or more is a pause; 60 s or more is treated as the user
+having walked away and counts as neither. Burst-length spread, mean pause
+duration, and the pause-to-burst ratio were measured and deliberately dropped —
+each is estimated from the handful of pauses in one window, so its own noise
+exceeded its signal and shipping it lowered the catch rate.
+
+Six key-class transition biases, each reporting how much slower or faster one
+coarse class of transition runs than the same person's own in-burst average:
+same-hand, alternating-hand, vowel to consonant, consonant run, word boundary,
+and symbol or digit. Per-digraph latency is the most discriminative keystroke
+signal known, and these are its coarse, privacy-bounded form. A class-pair
+estimate is shrunk toward "no bias" by four pseudo-observations so a barely
+observed class cannot emit noise as though it were a stable trait, and a
+feature that saw no keystrokes at all reports exactly zero, which the server
+reads as "carried no signal" rather than as a confident measurement.
+
+The privacy boundary is exact. Each keydown is read and reduced to one of eight
+classes — other, whitespace, digit, symbol, left consonant, left vowel, right
+consonant, right vowel — in the same statement that discards the key. The key
+is never stored and never leaves `classifyKey()`. Twenty-six letters share four
+buckets, so a class carries about two bits and a pair about four, and even that
+is only released as a mean over a whole window. Key identities, keycodes, raw
+key events, and typed text are never transmitted.
+
+The mockup is served from a different origin, so `mockup_website/app.js`
+reimplements the collector rather than importing `public/telemetry.js`. Both
+carry the same twenty feature names with the same semantics. They are duplicate
+implementations of one contract and must be changed together.
+
 ### Useful Human A versus Human A indicators
 
 - Stable key-hold center with ordinary variation
 - Stable transition and key-interval centers
 - Similar pause and burst structure
+- Similar key-class transition biases, especially the same-hand and
+  alternating-hand pair
 - Similar aggregate pointer velocity
 - Similar pointer acceleration and direction-change distributions
 - Similar behavior across multiple days, not just one session
 - Similarity that remains acceptable after ordinary device and posture changes
+
+Keyboard features carry this comparison. Pointer features are the weakest
+family in the vector: velocity, acceleration, and direction-change
+distributions overlap heavily between people and shift with the input device,
+the surface, the pointer-acceleration setting, and the task. Treat a
+pointer-only comparison as close to uninformative about identity.
 
 ### Useful Human A versus Human B indicators
 
@@ -697,8 +800,22 @@ Never implement it by disabling RLS.
 
 ## Hugging Face component
 
-The Hugging Face code is an adapter for an optional anomaly model. It does not
-train a model and currently does not run during enrollment or verification.
+The Hugging Face code is dead code. It is an adapter for an optional anomaly
+model that is wired for readiness only and is never invoked. It does not train
+a model and it does not run during enrollment, verification, or login.
+
+Calling it "shadow mode" overstates it, and this document previously did. There
+is no shadow path: `analyze()` has no call sites in `server.js`, `src/`, or
+`scripts/`, so nothing calls it, nothing records its output, and nothing
+compares it with anything. The only callers anywhere in the repository are
+three unit tests. The single production reference to the adapter is a readiness
+and capability label read.
+
+`hugging_face` must not be listed in `ODYSSEUS_REQUIRED_PROVIDERS`. The adapter
+reports `unchecked` until a first successful live call, and no such call
+exists, so requiring it would pin `/api/ready` at 503 forever. `server.js`
+currently filters both `hugging_face` and `gemini` out of that variable
+defensively, which means `turnstile` is the only value that has any effect.
 
 ### Plain-language answer
 
@@ -708,10 +825,10 @@ agent, change a login result, strengthen a fingerprint, or send any data
 because no application route calls it.
 
 What exists is a guarded connector that could send a small, already-aggregated
-local report to a separately configured HTTPS inference endpoint. If that
-future endpoint returns a valid anomaly label, Odysseus marks the result as
-shadow-only advice. The local deterministic decision has already been made,
-and the Hugging Face result is not allowed to authorize or deny anything.
+local report to a separately configured HTTPS inference endpoint. Its return
+values carry `shadowOnly: true` and `grantEffect: "none"` labels, which
+describe what the output *would* mean if some future call site existed. No such
+call site exists today.
 
 It is not a bundled model. It has no training dataset, model weights, fine
 tuning, background learning, or browser-side Hugging Face code. Setting a
@@ -775,6 +892,12 @@ threshold, session, profile, device, or password decision.
 
 No Hugging Face endpoint or token is configured in the current environment.
 The server exposes readiness only. No application path calls `analyze()`.
+`ODYSSEUS_HUGGING_FACE_ENDPOINT` is the gate: without it the adapter reports
+`disabled` and `analyze()` would short-circuit even if something called it.
+
+Note that `.env.example` still says shadow output "is recorded for comparison".
+That is not true and there is no recording path; the comment needs correcting
+in that file.
 
 To evaluate it safely:
 
@@ -799,22 +922,28 @@ text, device data, or network data.
 
 The adapter:
 
-- Uses the Interactions API
-- Keeps the key in a request header
-- Sets storage and background execution to false
-- Requests strict JSON
+- Posts to `https://generativelanguage.googleapis.com/v1beta/interactions`
+- Keeps the key in the `x-goog-api-key` header, never in the URL
+- Sets `store: false` and `background: false`
+- Requests strict JSON against a fixed schema
 - Validates the output schema
 - Rejects authorization language
 - Returns `authorizationDecision: null`
 
+The endpoint is correct and needs no change. `v1beta/interactions` is the
+current Gemini Interactions API; `generateContent` is the legacy path.
+
 A fresh synthetic check on July 25, 2026 returned HTTP 401. The key and model
 are present in the process environment, but the provider did not authorize the
-request. I am unsure whether the key is invalid, restricted to another API or
-project, or lacks access to the selected model. No key or response body was
-written to the repository.
+request. **HTTP 401 is an authorization result, not a routing result — a wrong
+path returns 404.** The failure is therefore on the credential or project side:
+the key may be invalid, restricted to another API or project, or lacking access
+to the selected model. No key or response body was written to the repository.
 
 Gemini should remain treated as unavailable until a privacy-safe synthetic
-request succeeds.
+request succeeds. Note also that the "Explain this result" control lives in the
+hidden session-consistency card, so the explanation route is currently not
+reachable from the console UI at all, whatever the key status.
 
 ## Evaluation design
 
@@ -892,6 +1021,9 @@ The demo can now demonstrate the intended distinction:
 - Human B versus Human A measures cross-person separation.
 - Human or agent likelihood is assessed independently as automation risk.
 - Fast password tooling is blocked and explicitly flagged.
+- The local admin viewer is the only place any of this is visible. The
+  application UI discloses no score, decision, reason, automation verdict, or
+  profiling progress to anyone.
 - The local admin viewer exposes the actual baseline values and comparisons
   needed to explain the result.
 - The stronger local test can make a bounded score-qualified amendment without
@@ -899,7 +1031,8 @@ The demo can now demonstrate the intended distinction:
   report-only.
 - Human B and automated login attempts receive no session and cannot poison
   the template.
-- Any network-restriction warning is explicitly simulated and never enforced.
+- No network-restriction warning is displayed at all any more, and none was
+  ever enforced.
 
 The largest remaining security gaps are server-issued replay-resistant
 ceremonies, immutable baseline history, production shared infrastructure,

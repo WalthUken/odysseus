@@ -415,6 +415,77 @@ function credentialsFrom(request) {
   };
 }
 
+// Odysseus refuses to open a session for an account that already has a
+// behavioural profile unless the login request carries evidence to weigh
+// against it, so the sign-in card measures the visitor's typing and forwards
+// the result through here. Rather than relaying the browser's JSON verbatim,
+// the evidence is rebuilt into exactly the shape the API documents:
+//
+//   { profileId, status, sampleCounts, vector, diagnostics, interactionEvidence }
+//
+// Anything else a page might have added is dropped, because an unrecognised
+// field makes the whole login fail validation upstream. A sample that is too
+// small to score carries its counts and nothing else - supplying telemetry
+// alongside "insufficient_evidence" is rejected.
+function behaviorEvidenceFrom(value, profileId) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  if (value.status !== "ready" && value.status !== "insufficient_evidence") {
+    return null;
+  }
+  if (
+    !value.sampleCounts
+    || typeof value.sampleCounts !== "object"
+    || Array.isArray(value.sampleCounts)
+  ) {
+    return null;
+  }
+
+  // The profile Odysseus holds is keyed by the account name this server relays
+  // telemetry under, not by whatever the page typed, so it is set here.
+  const evidence = {
+    profileId,
+    status: value.status,
+    sampleCounts: value.sampleCounts,
+  };
+  if (value.status === "insufficient_evidence") {
+    return evidence;
+  }
+  for (const key of ["vector", "diagnostics"]) {
+    if (value[key] !== undefined && value[key] !== null) {
+      evidence[key] = value[key];
+    }
+  }
+  const interactionEvidence = versionedInteractionEvidence(
+    value.interactionEvidence,
+  );
+  if (interactionEvidence) {
+    evidence.interactionEvidence = interactionEvidence;
+  }
+  return evidence;
+}
+
+// Odysseus stamps a schema version on an interaction summary and rejects the
+// whole sample if it is missing, which silently costs the visitor the
+// comparison. Pages here send the measurements without declaring which envelope
+// they are in, so the version is filled in from the shape actually present: a
+// whole-session aggregate is the version 2 envelope, and without one the
+// version 1 envelope describes it exactly. Nothing is measured or invented
+// here, and a page that declares its own version keeps it.
+function versionedInteractionEvidence(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  if (value.version !== undefined) {
+    return value;
+  }
+  return {
+    ...value,
+    version: value.sessionAggregate === undefined ? 1 : 2,
+  };
+}
+
 function serviceDown(response) {
   response.status(503).json({
     error:
@@ -485,15 +556,33 @@ app.post("/api/signup", async (request, response) => {
   }
 });
 
+// Deliberately says nothing. A behavioural refusal is a telemetry result, and
+// those are only ever readable through the gated report viewer, so the visitor
+// is told that the sign-in did not complete and nothing more. It is not phrased
+// as a bad password either: their password was fine, and sending them off to
+// reset a working credential would be a lie that costs them their account.
+const SIGN_IN_NOT_COMPLETED =
+  "We could not complete this sign-in. Please try again.";
+
 app.post("/api/login", async (request, response) => {
   const credentials = credentialsFrom(request);
+  const behaviorEvidence = behaviorEvidenceFrom(
+    request.body?.behaviorEvidence,
+    credentials.username.toLowerCase(),
+  );
 
   try {
-    const result = await forwardCredentials("/api/auth/login", credentials);
+    const result = await forwardCredentials(
+      "/api/auth/login",
+      behaviorEvidence ? { ...credentials, behaviorEvidence } : credentials,
+    );
 
     if (result.status === 200) {
       const username =
         result.body?.user?.username || credentials.username.toLowerCase();
+      // The signed-in Odysseus cookies are what every later telemetry batch
+      // rides on. Losing them here is what used to make a returning visitor's
+      // behaviour unobservable, so they are kept exactly as they arrived.
       startSession(response, username, result.jar);
       response.json({ username });
       return;
@@ -508,19 +597,17 @@ app.post("/api/login", async (request, response) => {
 
     // Odysseus checks the password before it weighs behaviour, so a
     // BEHAVIOR_LOGIN_DENIED reply means the credentials were right and only
-    // the behavioural gate refused. This storefront must not tell the visitor
-    // that such a gate exists, and locking them out of a demo trading site
-    // over it would be worse, so they continue with no upstream session:
-    // nothing signed in happens on the Odysseus side and telemetry from this
-    // visit is dropped instead of relayed.
+    // the behavioural gate refused. The visitor is not signed in: handing them
+    // a storefront session with no upstream cookies would leave them looking
+    // authenticated here while Odysseus knew nothing about them, and every
+    // sample they produced afterwards would be discarded. They are told the
+    // sign-in did not complete and invited to try again - a fresh attempt
+    // measures fresh typing, which is the retry that can actually succeed.
     if (result.body?.error?.code === "BEHAVIOR_LOGIN_DENIED") {
-      const username =
-        credentials.username.trim().toLowerCase();
       console.warn(
-        `odysseus declined the session for ${username}; continuing without one`,
+        `odysseus declined the session for ${credentials.username.toLowerCase()}`,
       );
-      startSession(response, username, null);
-      response.json({ username });
+      response.status(409).json({ error: SIGN_IN_NOT_COMPLETED });
       return;
     }
 
@@ -702,13 +789,20 @@ app.post("/api/telemetry/verify", async (request, response) => {
     return;
   }
   const payload = { vector };
-  if (
-    request.body.interactionEvidence !== undefined
-    && request.body.interactionEvidence !== null
-  ) {
-    payload.interactionEvidence = request.body.interactionEvidence;
+  const interactionEvidence = versionedInteractionEvidence(
+    request.body.interactionEvidence,
+  );
+  if (interactionEvidence) {
+    payload.interactionEvidence = interactionEvidence;
   }
   await relayTelemetry(request, response, "/api/verify", payload);
+});
+
+// The only thing the page needs to know about Odysseus is where its report
+// viewer lives, so the sign-in card can link to it. No account or telemetry
+// state is exposed here.
+app.get("/api/config", (_request, response) => {
+  response.json({ adminUrl: `${ODYSSEUS_ORIGIN}/admin` });
 });
 
 // The answer store lives inside this directory, so keep it off the static

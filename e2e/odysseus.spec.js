@@ -3,13 +3,53 @@
 const { expect, test } = require("@playwright/test");
 
 const {
+  GENERIC_SIGN_IN_FAILURE,
   TEST_PASSWORD,
+  captureSignInRefusal,
   completeMockQuestionnaire,
+  expectNoBehaviorDisclosure,
   observePageFailures,
   openOdysseus,
   registerAccount,
   uniqueUsername,
 } = require("./helpers");
+
+// A denied login response. The console must react to it exactly as it reacts
+// to a wrong password: nothing in this payload may reach the page.
+const DENIED_LOGIN_BODY = Object.freeze({
+  error: {
+    code: "BEHAVIOR_LOGIN_DENIED",
+    message: "Behavioral review required.",
+  },
+  behaviorDecision: {
+    decision: "deny",
+    classification: "suspicious_identity",
+    identitySimilarity: {
+      classification: "different_from_baseline",
+      trustPercent: 22,
+      normalizedDistance: 3.2,
+      reasonCodes: ["IDENTITY_DISTANCE_TOO_HIGH"],
+    },
+    automationRisk: {
+      classification: "human_like_interaction",
+    },
+    simulatedIpRestriction: {
+      displayed: true,
+      enforced: false,
+    },
+    amendment: {
+      applied: false,
+      status: "not_applied",
+    },
+  },
+});
+
+const CREDENTIAL_FAILURE_BODY = Object.freeze({
+  error: {
+    code: "INVALID_CREDENTIALS",
+    message: "The username or password is incorrect.",
+  },
+});
 
 test("boots without browser errors", async ({ page }) => {
   const failures = observePageFailures(page);
@@ -49,6 +89,13 @@ test("registers with an exact six character test password", async ({
   await expect(page.locator(".trust-panel")).toBeHidden();
   await expect(page.locator(".verification-panel")).toBeHidden();
   await expect(page.locator("#enrollment-board")).toBeHidden();
+
+  // A "2 of 5" counter or a round tag would tell the user that a behavioral
+  // baseline is being assembled, so neither is rendered.
+  await expect(page.locator("#enrollment-round-tag")).toBeHidden();
+  await expect(page.locator("#enrollment-progress")).toBeHidden();
+  await expect(page.locator("#enrollment-progress-label")).toBeHidden();
+  await expect(page.locator("#enrollment-status")).toBeHidden();
 });
 
 test("signs out and creates a fresh account without a CSRF failure", async ({
@@ -119,8 +166,16 @@ test("opens the stock dashboard after the mock questionnaire", async ({
   await expect(page.locator("#dashboard-overview")).toBeVisible();
   await expect(page.locator("#dashboard-title")).toHaveText("Dashboard");
   await expect(page.locator("#session-workspace")).toBeHidden();
-  await expect(page.locator(".trust-panel")).toBeHidden();
   await expect(page).toHaveURL("/");
+
+  // Reaching the dashboard is the only feedback the check produces. The trust
+  // score, decision reason, automation card, raw signal metrics, and the
+  // technical report stay hidden even after a successful comparison.
+  await expect(page.locator(".trust-panel")).toBeHidden();
+  await expect(page.locator("#trust-score")).toBeHidden();
+  await expect(page.locator("#decision-reason")).toBeHidden();
+  await expect(page.locator("#automation-card")).toBeHidden();
+  await expect(page.locator("#security-report")).toBeHidden();
 });
 
 test("registers and lists the current device", async ({
@@ -180,15 +235,26 @@ test("handles unavailable or gated providers without breaking local auth", async
   await registerAccount(page, testInfo, "providers_off");
   await completeMockQuestionnaire(page, "provider setup response");
   await page.getByRole("button", { name: "Account security" }).click();
+  await expect(page.locator("#account-workspace")).toBeVisible();
   await page.locator("#security-center > details > summary").click();
-  await page.getByRole("button", {
-    name: "Explain this result",
-  }).click();
 
-  await expect(page.locator("#explanation-status")).toContainText(
-    /(not enabled|unavailable|disabled|not configured|received|complete a session check)/i
-  );
-  await expect(page.locator("#explanation-text")).not.toBeEmpty();
+  // The advisory Gemini explanation is a behavioral verdict in prose, so the
+  // control that requested it is no longer offered anywhere in the console.
+  // It stays in the DOM because account.js binds it during start-up.
+  await expect(page.locator("#explanation-request")).toHaveCount(1);
+  await expect(page.locator("#explanation-request")).toBeHidden();
+  await expect(page.locator("#explanation-text")).toBeHidden();
+  await expect(page.locator("#explanation-status")).toBeHidden();
+  await expect(page.getByRole("button", {
+    name: "Explain this result",
+  })).toBeHidden();
+
+  // Unconfigured providers must not break the parts of the account view that
+  // a user can still reach.
+  await expect(page.getByRole("button", {
+    name: "Register this device",
+  })).toBeVisible();
+  await expectNoBehaviorDisclosure(page);
   expect(failures).toEqual([]);
 });
 
@@ -197,12 +263,15 @@ test("serves both local account report pages", async ({
 }) => {
   const failures = observePageFailures(page);
 
+  // Both viewers are served only while ODYSSEUS_DEMO_ADMIN_BYPASS is set (see
+  // playwright.config.js) and only to a loopback client. The form itself takes
+  // the account's own username and password, not the bypass value.
   await page.goto("/admin");
   await expect(page.getByRole("heading", {
     name: "Inspect one account fingerprint",
   })).toBeVisible();
   await expect(page.getByLabel("Account username")).toBeVisible();
-  await expect(page.getByLabel("Admin access code")).toBeVisible();
+  await expect(page.getByLabel("Account password")).toBeVisible();
 
   const testPage = await page.goto("/admin/test");
   expect(testPage.ok()).toBe(true);
@@ -210,7 +279,7 @@ test("serves both local account report pages", async ({
     name: "Build a stronger comparison report",
   })).toBeVisible();
   await expect(page.getByLabel("Account name")).toBeVisible();
-  await expect(page.getByLabel("Admin access code")).toBeVisible();
+  await expect(page.getByLabel("Account password")).toBeVisible();
   expect(failures).toEqual([]);
 });
 
@@ -281,7 +350,7 @@ test("renders saved decisions, contributions, and update history", async ({
 
   await page.goto("/admin");
   await page.getByLabel("Account username").fill("person_a");
-  await page.getByLabel("Admin access code").fill("adminbypass");
+  await page.getByLabel("Account password").fill(TEST_PASSWORD);
   await page.getByRole("button", {
     name: "Prepare account report",
   }).click();
@@ -297,11 +366,11 @@ test("renders saved decisions, contributions, and update history", async ({
   await expect(page.locator("#admin-report")).toContainText("Applied");
 });
 
-test("sends text-free login behavior evidence and shows demo restriction", async ({
+test("sends text-free login behavior evidence and discloses nothing", async ({
   page,
 }) => {
   const username = "person_a_login";
-  const password = "abc123";
+  const password = TEST_PASSWORD;
   let loginBody = null;
 
   await page.route("**/api/auth/login", async (route) => {
@@ -309,31 +378,7 @@ test("sends text-free login behavior evidence and shows demo restriction", async
     await route.fulfill({
       status: 403,
       contentType: "application/json",
-      body: JSON.stringify({
-        error: {
-          code: "BEHAVIOR_LOGIN_DENIED",
-          message: "Behavioral review required.",
-        },
-        behaviorDecision: {
-          decision: "deny",
-          classification: "suspicious_identity",
-          identitySimilarity: {
-            classification: "different_from_baseline",
-            reasonCodes: ["IDENTITY_DISTANCE_TOO_HIGH"],
-          },
-          automationRisk: {
-            classification: "human_like_interaction",
-          },
-          simulatedIpRestriction: {
-            displayed: true,
-            enforced: false,
-          },
-          amendment: {
-            applied: false,
-            status: "not_applied",
-          },
-        },
-      }),
+      body: JSON.stringify(DENIED_LOGIN_BODY),
     });
   });
 
@@ -349,14 +394,39 @@ test("sends text-free login behavior evidence and shows demo restriction", async
   );
   await authForm.getByRole("button", { name: "Sign in" }).click();
 
-  await expect(page.locator("#behavior-access-warning")).toBeVisible();
-  await expect(page.locator("#behavior-warning-title")).toHaveText(
-    "This sign-in did not match safely",
+  // The console lands back on an ordinary, unexplained sign-in refusal. The
+  // retired review panel, and the simulated-restriction notice it contained,
+  // must stay hidden even though the response asked for both.
+  await expect(page.locator("#auth-status")).toHaveText(
+    GENERIC_SIGN_IN_FAILURE,
   );
-  await expect(page.locator("#simulated-ip-warning")).toBeVisible();
-  await expect(page.locator("#simulated-ip-warning")).toContainText(
-    "No IP address has been blocked",
-  );
+  await expect(page.locator("#auth-form")).toBeVisible();
+  await expect(page.locator("#auth-username")).toBeFocused();
+  await expect(page.locator("#auth-password")).toHaveValue("");
+  await expect(page.locator("#behavior-access-warning")).toBeHidden();
+  await expect(page.locator("#simulated-ip-warning")).toBeHidden();
+  await expect(page.getByRole("button", {
+    name: "Return to sign in",
+  })).toBeHidden();
+
+  // Nothing from behaviorDecision reaches the page: no trust score, no
+  // decision, no reason code, no automation verdict, no profiling progress.
+  await expectNoBehaviorDisclosure(page, { strictText: true });
+  const visibleText = await page.locator("body").innerText();
+  for (const leaked of [
+    "22",
+    "3.2",
+    "IDENTITY_DISTANCE_TOO_HIGH",
+    "Identity Distance Too High",
+    "suspicious_identity",
+    "human_like_interaction",
+    "different_from_baseline",
+    "Behavioral review required.",
+  ]) {
+    expect(visibleText).not.toContain(leaked);
+  }
+
+  // The evidence still travels, and still carries no text or key identity.
   expect(loginBody.behaviorEvidence.profileId).toBe(username);
   expect(["ready", "insufficient_evidence"]).toContain(
     loginBody.behaviorEvidence.status,
@@ -369,53 +439,47 @@ test("sends text-free login behavior evidence and shows demo restriction", async
       loginBody.behaviorEvidence.interactionEvidence.sampleCounts,
     );
   }
-  expect(JSON.stringify(loginBody.behaviorEvidence)).not.toContain(password);
-
-  await page.getByRole("button", { name: "Return to sign in" }).click();
-  await expect(page.locator("#auth-form")).toBeVisible();
-  await expect(page.locator("#behavior-access-warning")).toBeHidden();
+  const serializedEvidence = JSON.stringify(loginBody.behaviorEvidence);
+  expect(serializedEvidence).not.toContain(password);
+  expect(serializedEvidence).not.toMatch(
+    /"(key|keys|keyCode|keyCodes|code|codes|char|chars|text|value|content|transcript)"\s*:/i,
+  );
 });
 
-test("keeps sparse behavior review neutral without a demo restriction", async ({
+test("makes a behavioral refusal indistinguishable from a wrong password", async ({
   page,
 }) => {
-  await page.route("**/api/auth/login", async (route) => {
-    await route.fulfill({
-      status: 403,
-      contentType: "application/json",
-      body: JSON.stringify({
-        error: {
-          code: "BEHAVIOR_LOGIN_DENIED",
-          message: "More interaction is required.",
-        },
-        behaviorDecision: {
-          decision: "review",
-          classification: "insufficient_evidence",
-          identitySimilarity: {
-            classification: "insufficient_evidence",
-          },
-          automationRisk: {
-            classification: "insufficient_evidence",
-          },
-          simulatedIpRestriction: {
-            displayed: false,
-            enforced: false,
-          },
-        },
-      }),
-    });
-  });
-
-  await openOdysseus(page);
-  const authForm = page.locator("#auth-form");
-  await authForm.getByLabel("Username", { exact: true }).fill("person_a");
-  await authForm.getByLabel("Password", { exact: true }).fill("abc123");
-  await authForm.getByRole("button", { name: "Sign in" }).click();
-
-  await expect(page.locator("#behavior-warning-title")).toHaveText(
-    "More natural interaction is required",
+  // Same 403 the server sends when the behavioral comparison denies access.
+  const behavioral = await captureSignInRefusal(page, DENIED_LOGIN_BODY, 403);
+  // A second behavioral outcome: sparse evidence, no simulated restriction.
+  const sparse = await captureSignInRefusal(page, {
+    error: {
+      code: "BEHAVIOR_LOGIN_DENIED",
+      message: "More interaction is required.",
+    },
+    behaviorDecision: {
+      decision: "review",
+      classification: "insufficient_evidence",
+      identitySimilarity: { classification: "insufficient_evidence" },
+      automationRisk: { classification: "insufficient_evidence" },
+      simulatedIpRestriction: { displayed: false, enforced: false },
+    },
+  }, 403);
+  const credential = await captureSignInRefusal(
+    page,
+    CREDENTIAL_FAILURE_BODY,
+    401,
   );
-  await expect(page.locator("#simulated-ip-warning")).toBeHidden();
+
+  // Two different behavioral verdicts produce the same message, so the user
+  // cannot tell a mismatch from thin evidence, or either from a typo.
+  expect(behavioral.statusText).toBe(GENERIC_SIGN_IN_FAILURE);
+  expect(sparse.statusText).toBe(GENERIC_SIGN_IN_FAILURE);
+
+  // Outside the single status line, every refusal renders identical text. Any
+  // extra banner, badge, or explanation would break this equality.
+  expect(behavioral.maskedText).toBe(credential.maskedText);
+  expect(sparse.maskedText).toBe(credential.maskedText);
 });
 
 test("keeps ordinary credential failures generic", async ({ page }) => {
@@ -423,12 +487,7 @@ test("keeps ordinary credential failures generic", async ({ page }) => {
     await route.fulfill({
       status: 401,
       contentType: "application/json",
-      body: JSON.stringify({
-        error: {
-          code: "INVALID_CREDENTIALS",
-          message: "The username or password is incorrect.",
-        },
-      }),
+      body: JSON.stringify(CREDENTIAL_FAILURE_BODY),
     });
   });
 
@@ -437,11 +496,12 @@ test("keeps ordinary credential failures generic", async ({ page }) => {
   await authForm.getByLabel("Username", { exact: true }).fill(
     "unknown_account",
   );
-  await authForm.getByLabel("Password", { exact: true }).fill("abc123");
+  await authForm.getByLabel("Password", { exact: true }).fill(TEST_PASSWORD);
   await authForm.getByRole("button", { name: "Sign in" }).click();
 
   await expect(page.locator("#auth-status")).toHaveText(
     "The username or password is incorrect.",
   );
   await expect(page.locator("#behavior-access-warning")).toBeHidden();
+  await expectNoBehaviorDisclosure(page, { strictText: true });
 });

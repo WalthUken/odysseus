@@ -15,13 +15,29 @@ The optional advisory path is connected but remains outside authorization.
 - The adapter uses the Interactions API with `store: false` and
   `background: false`.
 - The key is sent only in the `x-goog-api-key` header.
-- The browser calls the provider only after an explicit user action.
 - Provider output remains advisory with `authorizationDecision: null`.
+
+The endpoint is correct.
+`https://generativelanguage.googleapis.com/v1beta/interactions` is the current
+Gemini Interactions API; `generateContent` is the legacy path. Nothing in this
+document should be read as saying the URL is wrong or broken.
 
 Without a key, the endpoint reports a disabled provider and the rest of the
 application remains operational. The user-level key tested on July 25, 2026
-returned HTTP 401 and remains outside the repository. Gemini must be considered
-unavailable until the provider-side authorization setup succeeds.
+returned HTTP 401 and remains outside the repository. **HTTP 401 is an
+authorization result, not a routing result: a wrong path returns 404.** The
+problem is on the credential or project-access side, and the request URL needs
+no change. Gemini must be considered unavailable until the provider-side
+authorization setup succeeds.
+
+One further correction to earlier drafts of this document: the browser no
+longer calls the provider after an explicit user action, because there is no
+longer an action to take. The "Explain this result" control sits inside the
+session-consistency card, which is now permanently hidden along with every
+other behavioral verdict surface. `public/account.js` still binds the control,
+but a user cannot reach it, so the explanation route is unreachable from the
+console UI. Any rollout gate below that assumes a visible advisory panel is
+blocked on that product decision, not on the provider.
 
 ## Current implementation inventory
 
@@ -32,7 +48,7 @@ unavailable until the provider-side authorization setup succeeds.
 | Active API route | Server-owned account audit input | Add full coarse privacy projection |
 | Environment configuration | Server-only key and model | Add mode, cost, and concurrency controls |
 | Readiness | Optional provider state | Preserve optional status |
-| Browser UI | Explicit request and advisory label | Hide unless rollout mode is visible |
+| Browser UI | Control bound but permanently hidden; route unreachable from the UI | Keep hidden unless the disclosure decision is revisited |
 | Unit tests | Transport, validation, and route tests | Expand policy-invariance coverage |
 | Authorization effect | Always null | Preserve as an architectural invariant |
 
@@ -84,8 +100,11 @@ Removing them creates a stronger safety boundary. The model cannot change or res
 ### 5. Provider authorization is not operational
 
 The locally configured authorization key returned HTTP 401 from the Interactions
-API. Resolve the provider-side project and model access before any visible
-rollout. Do not work around the failure by putting a key in browser code.
+API. This is a credentials and project-access failure, not a wrong endpoint: the
+URL is the current Interactions API, and a wrong path would have returned 404.
+Resolve the provider-side project and model access before any visible rollout.
+Do not change the endpoint, and do not work around the failure by putting a key
+in browser code.
 
 ### 6. The output validator is necessary but too narrow
 
@@ -689,7 +708,14 @@ Assert byte-for-byte equality for:
 
 ### `e2e/odysseus.spec.js`
 
-Add browser journeys for:
+The suite currently asserts the opposite of a visible rollout: the "handles
+unavailable or gated providers without breaking local auth" test checks that
+`#explanation-request`, `#explanation-text`, and `#explanation-status` are all
+present in the DOM and all hidden, and that no "Explain this result" control is
+offered anywhere. That assertion encodes the standing product decision and must
+not be relaxed to enable a rollout gate.
+
+If a visible mode is ever approved, add browser journeys for:
 
 - Panel hidden in off mode.
 - Panel hidden in shadow mode.

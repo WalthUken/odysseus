@@ -526,6 +526,134 @@ async function getProfileOrThrow(database, userId, profileId) {
   return profile;
 }
 
+// A profile enrolled before a collector learned a new feature knows nothing
+// about that feature, and src/behavior.js requires a submitted vector's keys to
+// match the enrolled set exactly. Left alone, the first browser to send a new
+// feature would lock every existing profile out of verification.
+//
+// So the submitted vector is projected onto what the template actually knows:
+// features the template never enrolled are dropped, and the score is computed
+// over the intersection. Dropping features can only ever remove evidence, never
+// manufacture agreement, so this cannot help a stranger pass - but a projection
+// down to almost nothing would compare too little to mean anything, so a floor
+// is enforced below.
+const MINIMUM_PROJECTED_FEATURES = 8;
+
+function projectVectorOntoTemplate(vector, template) {
+  if (
+    vector === null
+    || typeof vector !== "object"
+    || Array.isArray(vector)
+    || !Array.isArray(template?.featureKeys)
+  ) {
+    // Malformed input is not this function's to diagnose; hand it to the
+    // validator downstream so the caller still gets the usual error.
+    return { vector, template, projected: false };
+  }
+
+  const templateKeys = new Set(template.featureKeys);
+  const retained = template.featureKeys.filter(
+    (key) => Object.hasOwn(vector, key),
+  );
+  const dropped = Object.keys(vector).filter((key) => !templateKeys.has(key));
+
+  if (dropped.length === 0 && retained.length === template.featureKeys.length) {
+    return { vector, template, projected: false };
+  }
+
+  const floor = Math.min(
+    template.featureKeys.length,
+    MINIMUM_PROJECTED_FEATURES,
+  );
+  if (retained.length < floor) {
+    throw new ValidationError(
+      "The submitted feature vector shares too few features with the enrolled "
+      + "profile to be scored.",
+      {
+        expected: [...template.featureKeys],
+        received: Object.keys(vector).sort(),
+      },
+    );
+  }
+
+  const projectedVector = {};
+  for (const key of retained) {
+    projectedVector[key] = vector[key];
+  }
+
+  if (retained.length === template.featureKeys.length) {
+    // Only unknown extras were dropped; the template is untouched.
+    return { vector: projectedVector, template, projected: true };
+  }
+
+  // The client is behind the template and did not send everything it enrolled.
+  // Narrow the template to the features both sides carry, keeping means, scales
+  // and the comparable set consistent with each other.
+  const means = Object.create(null);
+  const deviations = Object.create(null);
+  const scales = Object.create(null);
+  for (const key of retained) {
+    means[key] = template.means[key];
+    deviations[key] = template.deviations[key];
+    scales[key] = template.scales[key];
+  }
+  const narrowed = {
+    ...template,
+    featureKeys: [...retained],
+    means,
+    deviations,
+    scales,
+  };
+  const activeInProjection = Array.isArray(template.activeFeatureKeys)
+    ? retained.filter((key) => template.activeFeatureKeys.includes(key))
+    : null;
+  if (activeInProjection && activeInProjection.length > 0) {
+    narrowed.activeFeatureKeys = activeInProjection;
+  } else if (activeInProjection) {
+    throw new ValidationError(
+      "The submitted feature vector carries none of the features this profile "
+      + "can compare.",
+      {
+        expected: [...template.featureKeys],
+        received: Object.keys(vector).sort(),
+      },
+    );
+  }
+
+  return { vector: projectedVector, template: narrowed, projected: true };
+}
+
+// The behavioural login route has the same problem from the other direction:
+// evidence carrying a feature the profile never enrolled is rejected outright.
+// Only unknown extras are dropped here; missing features are already handled by
+// the coverage rules in src/behavior-lifecycle.js.
+function projectEvidenceVector(evidence, template) {
+  if (
+    evidence === null
+    || typeof evidence !== "object"
+    || Array.isArray(evidence)
+    || evidence.vector === null
+    || typeof evidence.vector !== "object"
+    || Array.isArray(evidence.vector)
+    || !Array.isArray(template?.featureKeys)
+  ) {
+    return evidence;
+  }
+
+  const templateKeys = new Set(template.featureKeys);
+  const suppliedKeys = Object.keys(evidence.vector);
+  const retained = suppliedKeys.filter((key) => templateKeys.has(key));
+  if (retained.length === suppliedKeys.length) {
+    return evidence;
+  }
+
+  const vector = {};
+  for (const key of retained) {
+    vector[key] = evidence.vector[key];
+  }
+  return { ...evidence, vector };
+}
+
 async function createApp(options = {}) {
   const environment = options.env ?? process.env;
   const clock = options.clock ?? Date.now;
@@ -1398,7 +1526,10 @@ async function createApp(options = {}) {
           try {
             behaviorEvaluation = evaluateCompatibleEvidence(
               loginProfile.template,
-              request.body.behaviorEvidence,
+              projectEvidenceVector(
+                request.body.behaviorEvidence,
+                loginProfile.template,
+              ),
             );
             behaviorDecision = buildBehaviorDecision({
               template: loginProfile.template,
@@ -1799,15 +1930,24 @@ async function createApp(options = {}) {
             (round) => round.id === typingDiagnostics.missionId
           )
         : VERIFICATION_ROUNDS[0];
-      const measuredResult = evaluateVector(body.vector, profile.template);
-      const automationAssessment = assessAutomationRisk(
+      // Collectors learn new features over time; enrolled profiles do not.
+      // Score against what this profile actually knows instead of rejecting
+      // every older profile the moment a browser sends more than it enrolled.
+      const scoring = projectVectorOntoTemplate(
         body.vector,
+        profile.template,
+      );
+      const scoringTemplate = scoring.template;
+      const templateNarrowed = scoringTemplate !== profile.template;
+      const measuredResult = evaluateVector(scoring.vector, scoringTemplate);
+      const automationAssessment = assessAutomationRisk(
+        scoring.vector,
         typingDiagnostics,
         interactionEvidence,
       );
       const measuredDistance = scaledManhattanDistance(
-        body.vector,
-        profile.template,
+        scoring.vector,
+        scoringTemplate,
       );
       const featureDeltas = Object.entries(
         measuredDistance.contributions,
@@ -1884,13 +2024,13 @@ async function createApp(options = {}) {
         };
       }
       const behaviorDiagnostics = buildBehaviorDiagnostics(
-        body.vector,
-        profile.template,
+        scoring.vector,
+        scoringTemplate,
         typingDiagnostics,
         diagnosticRound
       );
       const featureCoverage = describeFeatureCoverage(
-        profile.template,
+        scoringTemplate,
         interactionEvidence ? interactionEvidence.sampleCounts : null,
       );
       if (!featureCoverage.sufficient) {
@@ -1909,7 +2049,7 @@ async function createApp(options = {}) {
         };
       }
       let behaviorDecision = buildBehaviorDecision({
-        template: profile.template,
+        template: scoringTemplate,
         evidenceStatus: featureCoverage.sufficient
           ? "ready"
           : "insufficient_evidence",
@@ -1976,10 +2116,13 @@ async function createApp(options = {}) {
           strongVerification,
           behaviorDecision,
           ...(
-            strongVerification
+            // A vector that had to be narrowed to be scored is missing
+            // features the template carries, so it cannot serve as a drift
+            // update candidate: template evolution needs the full enrolled set.
+            strongVerification && !templateNarrowed
               ? {
                 updateCandidate: {
-                  vector: body.vector,
+                  vector: scoring.vector,
                 },
               }
               : {}
@@ -2027,11 +2170,21 @@ async function createApp(options = {}) {
             vector: metadata.updateCandidate.vector,
           });
         }
-        const evolved = evolveTemplate(
-          profile.template,
-          [...distinctSessions.values()],
-          { updatedAt: currentDate(clock).toISOString() },
-        );
+        const candidateSessions = [...distinctSessions.values()];
+        const evolved = candidateSessions.length > 0
+          ? evolveTemplate(
+            profile.template,
+            candidateSessions,
+            { updatedAt: currentDate(clock).toISOString() },
+          )
+          // No session since the last update carried a vector covering the
+          // whole enrolled set, so there is nothing to learn drift from yet.
+          : {
+            update: {
+              status: "insufficient_evidence",
+              reasonCode: "WAITING_FOR_DISTINCT_VERIFIED_SESSIONS",
+            },
+          };
         driftUpdate = evolved.update;
         if (evolved.update.status === "updated") {
           await database.setProfile(

@@ -720,8 +720,161 @@ const TELEMETRY_FEATURE_NAMES = [
     'pointerAccelerationMean',
     'pointerAccelerationDeviation',
     'pointerJitterMean',
-    'pointerJitterDeviation'
+    'pointerJitterDeviation',
+    // Burst / pause structure, from inter-keydown gaps alone. Two people can
+    // share a key interval while one reaches it with long fast runs and rare
+    // long pauses and the other with short runs and frequent short ones, and
+    // the global average cannot tell those apart. Mean burst length is not
+    // emitted because it is the reciprocal of the pause ratio; burst-length
+    // spread, mean pause duration, and the pause-to-burst ratio are not
+    // emitted because they were measured to dilute the score rather than
+    // sharpen it. Identical set and semantics to public/telemetry.js.
+    'downDownPauseRatio',
+    'downDownInBurstMean',
+    // Key-class transition timing: how much slower (positive) or faster
+    // (negative) one coarse class of transition runs than this person's own
+    // in-burst average. See KEY CLASS SCHEME below.
+    'downDownSameHandBias',
+    'downDownAlternateHandBias',
+    'downDownVowelConsonantBias',
+    'downDownConsonantRunBias',
+    'downDownWordBoundaryBias',
+    'downDownSymbolBias'
 ];
+
+// Gaps at or above this are a thinking pause rather than part of a burst. The
+// value matches PAUSE_THRESHOLD_MS in public/diagnostics.js, so identity
+// features and reported typing diagnostics describe the same structure.
+const TELEMETRY_PAUSE_THRESHOLD_MS = 500;
+// Longer than this is the user walking away, not a pause inside a session.
+const TELEMETRY_IDLE_BREAK_MS = 60000;
+// Pseudo-observations pulling a barely-seen class pair back toward "no bias".
+const TELEMETRY_CLASS_PRIOR_SAMPLES = 4;
+
+/* ================= KEY CLASS SCHEME (privacy boundary) =================
+   The browser never sends key identities, keycodes, or raw key events, and
+   that promise holds here. Each keydown is reduced *at collection time* to one
+   of eight coarse classes; the key itself is discarded in the same statement
+   that produced the class, is never stored, and never leaves classifyTelemetryKey().
+   What the vector carries is six averages of inter-key gaps grouped by the
+   class of the pair - an aggregate over a whole window, not a sequence, so it
+   cannot be inverted into a key, a keycode, or typed text.
+
+     0 OTHER            modifiers, navigation, function keys, IME output
+     1 WHITESPACE       space, Enter, Tab (word and line boundaries)
+     2 DIGIT            0-9
+     3 SYMBOL           punctuation and other single-character keys
+     4 LEFT_CONSONANT   q w r t s d f g z x c v b
+     5 LEFT_VOWEL       a e
+     6 RIGHT_CONSONANT  y p h j k l n m
+     7 RIGHT_VOWEL      u i o
+
+   Hands follow the QWERTY split; on another layout the split is still
+   deterministic for that user, so it stays a stable personal trait. Twenty-six
+   letters share four buckets, so a class carries about two bits and a pair
+   about four - and even that is only ever released as a mean over many
+   keystrokes. This scheme must stay identical to the one in
+   public/telemetry.js: a profile enrolled on one surface is verified on the
+   other, so the two collectors have to agree on every class boundary.
+   ====================================================================== */
+const TELEMETRY_KEY_CLASS = {
+    OTHER: 0,
+    WHITESPACE: 1,
+    DIGIT: 2,
+    SYMBOL: 3,
+    LEFT_CONSONANT: 4,
+    LEFT_VOWEL: 5,
+    RIGHT_CONSONANT: 6,
+    RIGHT_VOWEL: 7
+};
+
+const TELEMETRY_LEFT_HAND_LETTERS = 'qwertasdfgzxcvb';
+const TELEMETRY_VOWEL_LETTERS = 'aeiou';
+const TELEMETRY_CLASS_PAIR_NAMES = [
+    'sameHand',
+    'alternateHand',
+    'vowelConsonant',
+    'consonantRun',
+    'wordBoundary',
+    'symbol'
+];
+
+function classifyTelemetryKey(event) {
+    const key = event && typeof event.key === 'string' ? event.key : '';
+    if (key === ' ' || key === 'Spacebar' || key === 'Enter' || key === 'Tab') {
+        return TELEMETRY_KEY_CLASS.WHITESPACE;
+    }
+    if (key.length !== 1) {
+        // Named keys (Shift, Backspace, ArrowLeft, F5, Process, ...).
+        return TELEMETRY_KEY_CLASS.OTHER;
+    }
+    if (key >= '0' && key <= '9') {
+        return TELEMETRY_KEY_CLASS.DIGIT;
+    }
+    const lower = key.toLowerCase();
+    if (lower < 'a' || lower > 'z' || lower.length !== 1) {
+        // A letter outside the Latin alphabet says nothing about hands here, so
+        // it is grouped with the unclassified keys rather than with punctuation.
+        return /\p{L}/u.test(key)
+            ? TELEMETRY_KEY_CLASS.OTHER
+            : TELEMETRY_KEY_CLASS.SYMBOL;
+    }
+    const leftHand = TELEMETRY_LEFT_HAND_LETTERS.indexOf(lower) >= 0;
+    const vowel = TELEMETRY_VOWEL_LETTERS.indexOf(lower) >= 0;
+    if (leftHand) {
+        return vowel
+            ? TELEMETRY_KEY_CLASS.LEFT_VOWEL
+            : TELEMETRY_KEY_CLASS.LEFT_CONSONANT;
+    }
+    return vowel
+        ? TELEMETRY_KEY_CLASS.RIGHT_VOWEL
+        : TELEMETRY_KEY_CLASS.RIGHT_CONSONANT;
+}
+
+// Categories overlap on purpose: a left-hand "th" is both a same-hand pair and
+// a consonant run, and each aggregate answers a different question.
+function telemetryClassPairCategories(previous, current) {
+    const isLetter = value => value >= TELEMETRY_KEY_CLASS.LEFT_CONSONANT;
+    const isLeft = value => (
+        value === TELEMETRY_KEY_CLASS.LEFT_CONSONANT ||
+        value === TELEMETRY_KEY_CLASS.LEFT_VOWEL
+    );
+    const isVowel = value => (
+        value === TELEMETRY_KEY_CLASS.LEFT_VOWEL ||
+        value === TELEMETRY_KEY_CLASS.RIGHT_VOWEL
+    );
+    const isConsonant = value => (
+        value === TELEMETRY_KEY_CLASS.LEFT_CONSONANT ||
+        value === TELEMETRY_KEY_CLASS.RIGHT_CONSONANT
+    );
+    const isSymbol = value => (
+        value === TELEMETRY_KEY_CLASS.DIGIT ||
+        value === TELEMETRY_KEY_CLASS.SYMBOL
+    );
+
+    const categories = [];
+    if (isLetter(previous) && isLetter(current)) {
+        categories.push(
+            isLeft(previous) === isLeft(current) ? 'sameHand' : 'alternateHand'
+        );
+    }
+    if (isVowel(previous) && isConsonant(current)) {
+        categories.push('vowelConsonant');
+    }
+    if (isConsonant(previous) && isConsonant(current)) {
+        categories.push('consonantRun');
+    }
+    if (
+        previous === TELEMETRY_KEY_CLASS.WHITESPACE ||
+        current === TELEMETRY_KEY_CLASS.WHITESPACE
+    ) {
+        categories.push('wordBoundary');
+    }
+    if (isSymbol(previous) || isSymbol(current)) {
+        categories.push('symbol');
+    }
+    return categories;
+}
 
 const TELEMETRY_DEFAULTS = {
     pointerThrottleMs: 80,
@@ -780,10 +933,103 @@ function createBehaviorCollector(options) {
         return Boolean(event && event.isTrusted === true);
     }
 
+    function createRhythmState() {
+        const classPairs = {};
+        TELEMETRY_CLASS_PAIR_NAMES.forEach(name => {
+            classPairs[name] = { count: 0, total: 0 };
+        });
+        return {
+            pauseCount: 0,
+            inBurstCount: 0,
+            inBurstTotal: 0,
+            classPairs: classPairs,
+            lastKeyClass: null
+        };
+    }
+
+    // Folds one keydown into the burst/pause structure and, when the gap falls
+    // inside a burst, into the class-pair aggregates. `gap` is null when no
+    // previous keydown is comparable (window start, or a visibility break).
+    function recordRhythm(rhythm, gap, keyClass) {
+        const continues = (
+            typeof gap === 'number' &&
+            Number.isFinite(gap) &&
+            gap >= 0 &&
+            gap <= TELEMETRY_IDLE_BREAK_MS
+        );
+
+        if (!continues) {
+            rhythm.lastKeyClass = keyClass;
+            return;
+        }
+
+        if (gap >= TELEMETRY_PAUSE_THRESHOLD_MS) {
+            rhythm.pauseCount += 1;
+            rhythm.lastKeyClass = keyClass;
+            return;
+        }
+
+        rhythm.inBurstCount += 1;
+        rhythm.inBurstTotal += gap;
+
+        // Class-pair timing is a motor measurement, so it uses in-burst gaps
+        // only. Including thinking pauses would measure where someone stopped
+        // to think, not which key combinations their hands stumble over.
+        if (rhythm.lastKeyClass !== null) {
+            const categories = telemetryClassPairCategories(
+                rhythm.lastKeyClass,
+                keyClass
+            );
+            for (let index = 0; index < categories.length; index += 1) {
+                const aggregate = rhythm.classPairs[categories[index]];
+                aggregate.count += 1;
+                aggregate.total += gap;
+            }
+        }
+        rhythm.lastKeyClass = keyClass;
+    }
+
+    // A bias around zero rather than a ratio around one, so a window with no
+    // keystrokes reports exactly zero and the server reads it as "no signal"
+    // instead of as a confident measurement.
+    function classPairBias(aggregate, referenceMean) {
+        if (
+            !aggregate ||
+            aggregate.count === 0 ||
+            !Number.isFinite(referenceMean) ||
+            referenceMean <= 0
+        ) {
+            return 0;
+        }
+        const observed = aggregate.total / aggregate.count / referenceMean;
+        const shrunk = (
+            ((observed * aggregate.count) + TELEMETRY_CLASS_PRIOR_SAMPLES) /
+            (aggregate.count + TELEMETRY_CLASS_PRIOR_SAMPLES)
+        );
+        return shrunk - 1;
+    }
+
+    function summarizeRhythm(rhythm) {
+        const intervalCount = rhythm.pauseCount + rhythm.inBurstCount;
+        const inBurstMean = rhythm.inBurstCount > 0
+            ? rhythm.inBurstTotal / rhythm.inBurstCount
+            : 0;
+        return {
+            pauseRatio: intervalCount > 0
+                ? rhythm.pauseCount / intervalCount
+                : 0,
+            inBurstMean: inBurstMean,
+            classPairBias: TELEMETRY_CLASS_PAIR_NAMES.map(
+                name => classPairBias(rhythm.classPairs[name], inBurstMean)
+            )
+        };
+    }
+
     const state = {
         started: false,
         metrics: null,
         activePresses: [],
+        keystrokeRhythm: createRhythmState(),
         lastKeyDownAt: null,
         lastKeyUpAt: null,
         lastPointer: null,
@@ -803,6 +1049,9 @@ function createBehaviorCollector(options) {
             pointerJitter: []
         };
         state.activePresses = [];
+        // Burst structure and class-pair timing. Holds counters and one coarse
+        // class code for the previous key, never a key, keycode, or character.
+        state.keystrokeRhythm = createRhythmState();
         state.lastKeyDownAt = null;
         state.lastKeyUpAt = null;
         state.lastPointer = null;
@@ -831,6 +1080,17 @@ function createBehaviorCollector(options) {
         }
         const timestamp = perfNow();
         const limit = config.maximumMetricSamples;
+        // The key is read here and discarded here: only the coarse class code
+        // survives this statement, and only aggregates of it are ever emitted.
+        const keyClass = classifyTelemetryKey(event);
+
+        recordRhythm(
+            state.keystrokeRhythm,
+            state.lastKeyDownAt === null
+                ? null
+                : timestamp - state.lastKeyDownAt,
+            keyClass
+        );
 
         if (state.lastKeyDownAt !== null) {
             const downDown = timestamp - state.lastKeyDownAt;
@@ -931,6 +1191,7 @@ function createBehaviorCollector(options) {
     function handleVisibilityChange() {
         if (document.hidden) {
             state.activePresses.length = 0;
+            state.keystrokeRhythm.lastKeyClass = null;
             state.lastKeyDownAt = null;
             state.lastKeyUpAt = null;
             state.lastPointer = null;
@@ -968,6 +1229,7 @@ function createBehaviorCollector(options) {
         const pointerVelocity = summarize(state.metrics.pointerVelocity);
         const pointerAcceleration = summarize(state.metrics.pointerAcceleration);
         const pointerJitter = summarize(state.metrics.pointerJitter);
+        const rhythm = summarizeRhythm(state.keystrokeRhythm);
 
         const featureValues = [
             dwell[0], dwell[1],
@@ -975,8 +1237,11 @@ function createBehaviorCollector(options) {
             downDown[0], downDown[1],
             pointerVelocity[0], pointerVelocity[1],
             pointerAcceleration[0], pointerAcceleration[1],
-            pointerJitter[0], pointerJitter[1]
-        ].map(value => Number(value.toFixed(6)));
+            pointerJitter[0], pointerJitter[1],
+            rhythm.pauseRatio,
+            rhythm.inBurstMean
+        ].concat(rhythm.classPairBias)
+            .map(value => Number(value.toFixed(6)));
 
         const vector = {};
         TELEMETRY_FEATURE_NAMES.forEach((name, index) => {
