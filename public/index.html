@@ -16,45 +16,38 @@
     <script src="/account.js" defer></script>
     <script src="/app.js" defer></script>
   </head>
-  <body>
+  <body data-app-view="login">
     <a class="skip-link" href="#main-content">Skip to workspace</a>
 
-    <header class="site-header">
-      <a class="brand" href="/" aria-label="Odysseus home">
-        <span class="brand-mark" aria-hidden="true">
-          <span></span>
-        </span>
-        <span class="brand-copy">
-          <strong>Odysseus</strong>
-          <small>Account console</small>
-        </span>
-      </a>
+    <section class="login-shell" data-app-section="login">
+      <div class="login-container">
+        <div class="login-card glass-panel">
+          <header class="site-header">
+            <a class="brand" href="/" aria-label="Odysseus home">
+              <span class="terminal-logo-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <polyline points="2 12 6 12 9 3 15 21 18 12 22 12"></polyline>
+                </svg>
+              </span>
+              <span class="brand-copy">
+                <strong>Odysseus</strong>
+                <small>Secure market terminal</small>
+              </span>
+            </a>
+          </header>
 
-      <div
-        class="api-status"
-        id="api-status"
-        role="status"
-        aria-live="polite"
-      >
-        <span class="status-dot" aria-hidden="true"></span>
-        Checking engine
-      </div>
-    </header>
-
-    <main id="main-content">
       <section class="hero" aria-labelledby="hero-title">
         <div class="eyebrow">
           <span class="eyebrow-line" aria-hidden="true"></span>
-          Adaptive account security
+          Protected terminal access
         </div>
         <h1 id="hero-title">
-          A quieter way to
-          <span>check a session.</span>
+          Enter your
+          <span>secure workspace</span>
         </h1>
         <p class="hero-copy">
-          Sign in, complete a few short account prompts, and review a clear
-          session decision. The technical detail stays out of the way unless
-          you choose to open it.
+          Sign in to review demo market activity and complete a short session
+          check before protected account actions.
         </p>
       </section>
 
@@ -66,8 +59,9 @@
             <h2 id="auth-title">Start a protected session</h2>
             <p>
               This local beta uses demo-only accounts. After sign-in, a few
-              short questions help set up the session. Do not reuse a real
-              password.
+              short questions help set up the session. Entry timing is
+              compared automatically on returning sessions, without asking
+              you to identify yourself. Do not reuse a real password.
             </p>
           </div>
         </div>
@@ -134,17 +128,6 @@
           </p>
         </div>
 
-        <div class="current-user-panel" id="current-user-panel" hidden>
-          <span class="session-mark" aria-hidden="true"></span>
-          <div>
-            <span>Authenticated account</span>
-            <strong id="current-user">Not signed in</strong>
-          </div>
-          <button class="button button-quiet" id="logout-button" type="button">
-            Sign out
-          </button>
-        </div>
-
         <p
           class="auth-status"
           id="auth-status"
@@ -153,6 +136,64 @@
         >
           Sign in or create a local demo account to unlock the workspace.
         </p>
+      </section>
+
+      <section
+        class="behavior-access-warning"
+        id="behavior-access-warning"
+        aria-labelledby="behavior-warning-title"
+        aria-describedby="behavior-warning-summary"
+        tabindex="-1"
+        hidden
+      >
+        <div class="behavior-warning-icon" aria-hidden="true">!</div>
+        <p class="panel-kicker">Behavioral access review</p>
+        <h2 id="behavior-warning-title">This sign-in did not match safely</h2>
+        <p id="behavior-warning-summary">
+          The server found a meaningful difference from the saved account
+          fingerprint.
+        </p>
+
+        <dl class="behavior-warning-facts">
+          <div>
+            <dt>Identity similarity</dt>
+            <dd id="behavior-warning-identity">Review required</dd>
+          </div>
+          <div>
+            <dt>Automation risk</dt>
+            <dd id="behavior-warning-automation">Review required</dd>
+          </div>
+          <div>
+            <dt>Decision</dt>
+            <dd id="behavior-warning-decision">Access paused</dd>
+          </div>
+        </dl>
+
+        <div class="behavior-warning-reasons">
+          <h3>Why this was flagged</h3>
+          <ul id="behavior-warning-reason-list"></ul>
+        </div>
+
+        <div
+          class="simulated-ip-warning"
+          id="simulated-ip-warning"
+          role="alert"
+          hidden
+        >
+          <strong>Simulated IP restriction</strong>
+          <p>
+            Demo warning only. No IP address has been blocked, and this
+            prototype did not apply a real network restriction.
+          </p>
+        </div>
+
+        <button
+          class="button button-primary"
+          id="behavior-warning-retry"
+          type="button"
+        >
+          Return to sign in
+        </button>
       </section>
 
       <section
@@ -279,6 +320,301 @@
         </details>
       </section>
 
+        </div>
+      </div>
+    </section>
+
+    <div class="app-content-root" id="main-content">
+    <div class="global-session-panel">
+      <div class="current-user-panel" id="current-user-panel" hidden>
+        <span class="session-mark" aria-hidden="true"></span>
+        <div>
+          <span>Authenticated account</span>
+          <strong id="current-user">Not signed in</strong>
+        </div>
+        <button class="button button-quiet" id="logout-button" type="button">
+          Sign out
+        </button>
+      </div>
+    </div>
+
+    <div class="dashboard-shell" id="dashboard-shell">
+      <aside class="terminal-sidebar" aria-label="Terminal navigation">
+        <a class="terminal-logo" href="/" aria-label="Odysseus dashboard">
+          <span class="terminal-logo-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <polyline points="2 12 6 12 9 3 15 21 18 12 22 12"></polyline>
+            </svg>
+          </span>
+          <span>Odysseus</span>
+        </a>
+
+        <nav class="terminal-nav" aria-label="Application views">
+          <button
+            class="terminal-nav-button is-active"
+            type="button"
+            data-app-view-target="dashboard"
+            aria-controls="dashboard-overview"
+          >
+            <span class="terminal-nav-icon" aria-hidden="true">01</span>
+            Dashboard
+          </button>
+          <button
+            class="terminal-nav-button"
+            type="button"
+            data-app-view-target="session"
+            aria-controls="session-workspace"
+          >
+            <span class="terminal-nav-icon" aria-hidden="true">02</span>
+            Session check
+          </button>
+          <button
+            class="terminal-nav-button"
+            type="button"
+            data-app-view-target="account"
+            aria-controls="account-workspace"
+          >
+            <span class="terminal-nav-icon" aria-hidden="true">03</span>
+            Account security
+          </button>
+        </nav>
+
+        <div class="terminal-sidebar-note">
+          <span>Environment</span>
+          <strong>Local prototype</strong>
+        </div>
+      </aside>
+
+      <main class="terminal-main">
+        <header class="terminal-topbar">
+          <div class="terminal-search" aria-label="Demo market search">
+            <span aria-hidden="true">S</span>
+            <input
+              type="search"
+              placeholder="Search demo symbols"
+              aria-label="Search demo market symbols"
+            >
+          </div>
+
+          <div class="terminal-account">
+            <div
+              class="api-status"
+              id="api-status"
+              role="status"
+              aria-live="polite"
+            >
+              <span class="status-dot" aria-hidden="true"></span>
+              Checking engine
+            </div>
+            <div class="dashboard-user-summary">
+              <span
+                class="terminal-avatar"
+                id="dashboard-avatar"
+                aria-hidden="true"
+              >
+                O
+              </span>
+              <span>
+                <small>Secure session</small>
+                <strong id="dashboard-user">Not signed in</strong>
+              </span>
+            </div>
+            <button
+              class="terminal-theme-button"
+              id="dashboard-theme"
+              type="button"
+              aria-label="Change dashboard theme"
+              aria-pressed="false"
+            >
+              Use light theme
+            </button>
+          </div>
+        </header>
+
+        <section
+          class="terminal-view dashboard-overview"
+          id="dashboard-overview"
+          data-app-section="dashboard"
+          aria-labelledby="dashboard-title"
+          tabindex="-1"
+        >
+          <div class="terminal-view-heading">
+            <div>
+              <p class="terminal-kicker">Market overview</p>
+              <h1 id="dashboard-title">Dashboard</h1>
+            </div>
+            <span class="demo-market-badge">Demo market data</span>
+          </div>
+
+          <div class="market-widget-grid" aria-label="Demo market overview">
+            <article class="market-card glass-panel">
+              <div class="market-card-header">
+                <div>
+                  <strong>SPY</strong>
+                  <span>S&amp;P 500 ETF</span>
+                </div>
+                <span class="market-direction is-positive">Up</span>
+              </div>
+              <p class="market-price">$512.45</p>
+              <p class="market-change is-positive">+1.24% &nbsp; +$6.28</p>
+              <small>Demo market data</small>
+            </article>
+            <article class="market-card glass-panel">
+              <div class="market-card-header">
+                <div>
+                  <strong>QQQ</strong>
+                  <span>Invesco QQQ</span>
+                </div>
+                <span class="market-direction is-negative">Down</span>
+              </div>
+              <p class="market-price">$438.12</p>
+              <p class="market-change is-negative">-0.45% &nbsp; -$1.98</p>
+              <small>Demo market data</small>
+            </article>
+            <article class="market-card glass-panel">
+              <div class="market-card-header">
+                <div>
+                  <strong>NVDA</strong>
+                  <span>NVIDIA Corporation</span>
+                </div>
+                <span class="market-direction is-positive">Up</span>
+              </div>
+              <p class="market-price">$875.28</p>
+              <p class="market-change is-positive">+3.82% &nbsp; +$32.18</p>
+              <small>Demo market data</small>
+            </article>
+          </div>
+
+          <section class="market-chart glass-panel" aria-labelledby="market-chart-title">
+            <div class="market-panel-heading">
+              <div>
+                <span>Demo market data</span>
+                <h2 id="market-chart-title">AAPL volatility preview</h2>
+              </div>
+              <div class="market-range" aria-label="Selected range">
+                <span>1D</span>
+                <span>1W</span>
+                <strong>1M</strong>
+                <span>3M</span>
+              </div>
+            </div>
+            <div class="market-chart-graphic">
+              <svg
+                viewBox="0 0 900 260"
+                role="img"
+                aria-label="Illustrative one month demo volatility line"
+                preserveAspectRatio="none"
+              >
+                <defs>
+                  <linearGradient id="demo-chart-fill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#6366f1" stop-opacity="0.35"></stop>
+                    <stop offset="100%" stop-color="#6366f1" stop-opacity="0"></stop>
+                  </linearGradient>
+                </defs>
+                <path
+                  class="market-chart-area"
+                  d="M0 214 C72 202 102 172 160 184 S252 138 310 153 S403 85 470 112 S564 64 625 91 S715 55 780 73 S852 38 900 43 L900 260 L0 260 Z"
+                ></path>
+                <path
+                  class="market-chart-line"
+                  d="M0 214 C72 202 102 172 160 184 S252 138 310 153 S403 85 470 112 S564 64 625 91 S715 55 780 73 S852 38 900 43"
+                ></path>
+              </svg>
+            </div>
+          </section>
+
+          <section class="market-table-panel glass-panel" aria-labelledby="market-table-title">
+            <div class="market-panel-heading">
+              <div>
+                <span>Demo market data</span>
+                <h2 id="market-table-title">Most active options preview</h2>
+              </div>
+            </div>
+            <div class="market-table-scroll">
+              <table class="market-table">
+                <caption>Illustrative options activity using demo market data</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Symbol</th>
+                    <th scope="col">Type</th>
+                    <th scope="col">Strike</th>
+                    <th scope="col">Expiration</th>
+                    <th scope="col">Volume</th>
+                    <th scope="col">Last price</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>TSLA</td>
+                    <td><span class="market-pill is-call">Call</span></td>
+                    <td>$200.00</td>
+                    <td>2026-09-18</td>
+                    <td>124,532</td>
+                    <td>$12.45</td>
+                  </tr>
+                  <tr>
+                    <td>NVDA</td>
+                    <td><span class="market-pill is-call">Call</span></td>
+                    <td>$900.00</td>
+                    <td>2026-10-16</td>
+                    <td>98,210</td>
+                    <td>$34.20</td>
+                  </tr>
+                  <tr>
+                    <td>AAPL</td>
+                    <td><span class="market-pill is-put">Put</span></td>
+                    <td>$170.00</td>
+                    <td>2026-09-18</td>
+                    <td>85,411</td>
+                    <td>$2.15</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <section
+      class="terminal-view session-workspace standalone-app-view"
+      id="session-workspace"
+      data-app-section="session"
+      aria-labelledby="session-workspace-title"
+    >
+          <div class="standalone-view-bar">
+            <a class="terminal-logo" href="/" aria-label="Odysseus dashboard">
+              <span class="terminal-logo-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <polyline points="2 12 6 12 9 3 15 21 18 12 22 12"></polyline>
+                </svg>
+              </span>
+              <span>Odysseus</span>
+            </a>
+            <nav class="standalone-view-nav" aria-label="Application views">
+              <button type="button" data-app-view-target="dashboard">
+                Dashboard
+              </button>
+              <button type="button" data-app-view-target="session">
+                Session check
+              </button>
+              <button type="button" data-app-view-target="account">
+                Account security
+              </button>
+            </nav>
+          </div>
+          <div class="terminal-view-heading">
+            <div>
+              <p class="terminal-kicker">Session security</p>
+              <h1 id="session-workspace-title">Security questions</h1>
+              <p>
+                Complete the short prompts naturally so this session can be
+                compared with the saved account setup.
+              </p>
+            </div>
+            <span class="terminal-status-chip">Local processing</span>
+          </div>
+
       <section class="profile-bar" aria-labelledby="profile-title">
         <div class="profile-heading">
           <span class="profile-icon" aria-hidden="true">ID</span>
@@ -300,6 +636,7 @@
               disabled
             >
           </div>
+          <input id="demo-subject-label" type="hidden" value="" disabled>
           <button
             class="button button-quiet"
             id="reset-profile"
@@ -320,8 +657,8 @@
             <div class="panel-header">
               <div class="step-number" aria-hidden="true">01</div>
               <div>
-                <p class="panel-kicker">Quick account check</p>
-                <h2 id="enrollment-title">Set up this session</h2>
+                <p class="panel-kicker">Security setup</p>
+                <h2 id="enrollment-title">Answer setup questions</h2>
               </div>
               <span class="phase-tag" id="enrollment-round-tag">
                 Round 1 of 5
@@ -329,9 +666,9 @@
             </div>
 
             <p class="panel-copy">
-              Complete five short check-ins. Each one includes a reading
-              prompt, one answer in your own words, and a quick route across
-              the board.
+              Complete five brief questions. Each round includes a short
+              reading prompt, one response in your own words, and a quiet
+              confirmation check.
             </p>
 
             <div class="assurance-note">
@@ -344,31 +681,31 @@
 
             <div class="challenge-meta">
               <div>
-                <span>Check-in question</span>
+                <span>Security question</span>
                 <strong id="enrollment-mission">Northern bridge</strong>
               </div>
               <div class="challenge-meta-status">
-                <span id="enrollment-text-status">Phrase waiting</span>
-                <span id="enrollment-free-status">Answer waiting</span>
-                <span id="enrollment-trail-status">Trail 0 of 6</span>
+                <span id="enrollment-text-status">Response waiting</span>
+                <span id="enrollment-free-status">Open response later</span>
+                <span id="enrollment-trail-status">Activity collecting</span>
               </div>
             </div>
 
             <div class="prompt-card" aria-label="Enrollment reading prompt">
-              <span>Reading prompt</span>
+              <span>Security phrase</span>
               <strong id="enrollment-phrase">
-                Quiet signals cross the northern bridge before sunrise
+                Quiet routes cross the northern bridge before sunrise
               </strong>
             </div>
 
             <form class="challenge-form" id="enrollment-form">
               <div class="field">
-                <label for="enrollment-input">Type the reading prompt</label>
+                <label for="enrollment-input">Your response</label>
                 <input
                   id="enrollment-input"
                   name="enrollmentSample"
                   type="text"
-                  placeholder="Type it naturally small typos are fine"
+                  placeholder="Answer naturally in your own words"
                   autocomplete="off"
                   autocapitalize="off"
                   spellcheck="false"
@@ -376,14 +713,14 @@
                   disabled
                 >
                 <span class="field-help" id="enrollment-help">
-                  Odysseus accepts capitalization, spacing, punctuation, and
-                  small typos automatically. No Enter key is needed.
+                  Use at least 12 characters and 2 words. No exact answer or
+                  Enter key is required.
                 </span>
               </div>
 
               <div class="field free-typing-field">
                 <div class="field-label-row">
-                  <label for="enrollment-free-input">Your answer</label>
+                  <label for="enrollment-free-input">Final open response</label>
                   <span>24 characters and 4 words</span>
                 </div>
                 <textarea
@@ -408,12 +745,12 @@
               >
                 <div class="signal-trail-heading">
                   <div>
-                    <span>Quick route</span>
+                    <span>Confirmation check</span>
                     <strong id="enrollment-trail-title">
-                      Follow the highlighted points
+                      Follow the highlighted numbered boxes
                     </strong>
                   </div>
-                  <small>Move naturally between targets</small>
+                  <small>Select the numbered boxes in order</small>
                 </div>
                 <div
                   class="signal-board"
@@ -421,15 +758,15 @@
                   role="group"
                   aria-label="Enrollment route board"
                 >
-                  <button class="signal-target" type="button" data-slot="0"></button>
-                  <button class="signal-target" type="button" data-slot="1"></button>
-                  <button class="signal-target" type="button" data-slot="2"></button>
-                  <button class="signal-target" type="button" data-slot="3"></button>
-                  <button class="signal-target" type="button" data-slot="4"></button>
-                  <button class="signal-target" type="button" data-slot="5"></button>
-                  <button class="signal-target" type="button" data-slot="6"></button>
-                  <button class="signal-target" type="button" data-slot="7"></button>
-                  <button class="signal-target" type="button" data-slot="8"></button>
+                  <button class="signal-target" type="button" data-slot="0">Box 1</button>
+                  <button class="signal-target" type="button" data-slot="1">Box 2</button>
+                  <button class="signal-target" type="button" data-slot="2">Box 3</button>
+                  <button class="signal-target" type="button" data-slot="3">Box 4</button>
+                  <button class="signal-target" type="button" data-slot="4">Box 5</button>
+                  <button class="signal-target" type="button" data-slot="5">Box 6</button>
+                  <button class="signal-target" type="button" data-slot="6">Box 7</button>
+                  <button class="signal-target" type="button" data-slot="7">Box 8</button>
+                  <button class="signal-target" type="button" data-slot="8">Box 9</button>
                 </div>
               </section>
 
@@ -450,7 +787,7 @@
                 class="sample-progress"
                 id="enrollment-progress"
                 role="progressbar"
-                aria-label="Enrollment missions"
+                aria-label="Security setup questions"
                 aria-valuemin="0"
                 aria-valuemax="5"
                 aria-valuenow="0"
@@ -469,7 +806,7 @@
               role="status"
               aria-live="polite"
             >
-              Ready for the first mission.
+              Ready for the first question.
             </p>
           </section>
 
@@ -480,48 +817,48 @@
             <div class="panel-header">
               <div class="step-number" aria-hidden="true">02</div>
               <div>
-                <p class="panel-kicker">Returning session</p>
-                <h2 id="verification-title">Run a quick check</h2>
+                <p class="panel-kicker">Session confirmation</p>
+                <h2 id="verification-title">Confirm this session</h2>
               </div>
               <span class="phase-tag phase-tag-live">
                 <span aria-hidden="true"></span>
-                Session live
+                Question ready
               </span>
             </div>
 
             <p class="panel-copy">
-              Complete one new check-in to compare this session with the saved
-              setup. Written text is evaluated locally and cleared, and a new
-              question appears after every decision.
+              Complete one brief follow-up question to compare this session
+              with the saved setup. Written text is evaluated locally and
+              cleared after the result.
             </p>
 
             <div class="challenge-meta">
               <div>
-                <span>Check-in question</span>
+                <span>Security question</span>
                 <strong id="verification-mission">Steady session</strong>
               </div>
               <div class="challenge-meta-status">
-                <span id="verification-text-status">Phrase waiting</span>
-                <span id="verification-free-status">Answer waiting</span>
-                <span id="verification-trail-status">Trail 0 of 6</span>
+                <span id="verification-text-status">Response waiting</span>
+                <span id="verification-free-status">Open response later</span>
+                <span id="verification-trail-status">Activity collecting</span>
               </div>
             </div>
 
             <div class="prompt-card" aria-label="Verification reading prompt">
-              <span>Reading prompt</span>
+              <span>Security phrase</span>
               <strong id="verification-phrase">
-                A trusted session combines steady typing with smooth movement
+                A returning session follows each checkpoint in a steady order
               </strong>
             </div>
 
             <form class="challenge-form" id="verification-form">
               <div class="field">
-                <label for="verification-input">Type the reading prompt</label>
+                <label for="verification-input">Your response</label>
                 <input
                   id="verification-input"
                   name="verificationSample"
                   type="text"
-                  placeholder="Type it naturally small typos are fine"
+                  placeholder="Answer naturally in your own words"
                   autocomplete="off"
                   autocapitalize="off"
                   spellcheck="false"
@@ -529,14 +866,14 @@
                   disabled
                 >
                 <span class="field-help" id="verification-help">
-                  Odysseus accepts capitalization, spacing, punctuation, and
-                  small typos automatically. No Enter key is needed.
+                  Use at least 12 characters and 2 words. No exact answer or
+                  Enter key is required.
                 </span>
               </div>
 
               <div class="field free-typing-field">
                 <div class="field-label-row">
-                  <label for="verification-free-input">Your answer</label>
+                  <label for="verification-free-input">Open response</label>
                   <span>24 characters and 4 words</span>
                 </div>
                 <textarea
@@ -561,12 +898,12 @@
               >
                 <div class="signal-trail-heading">
                   <div>
-                    <span>Quick route</span>
+                    <span>Confirmation check</span>
                     <strong id="verification-trail-title">
-                      Follow the highlighted points
+                      Follow the highlighted numbered boxes
                     </strong>
                   </div>
-                  <small>Six targets complete the trail</small>
+                  <small>Select six numbered boxes in order</small>
                 </div>
                 <div
                   class="signal-board"
@@ -574,15 +911,15 @@
                   role="group"
                   aria-label="Verification route board"
                 >
-                  <button class="signal-target" type="button" data-slot="0"></button>
-                  <button class="signal-target" type="button" data-slot="1"></button>
-                  <button class="signal-target" type="button" data-slot="2"></button>
-                  <button class="signal-target" type="button" data-slot="3"></button>
-                  <button class="signal-target" type="button" data-slot="4"></button>
-                  <button class="signal-target" type="button" data-slot="5"></button>
-                  <button class="signal-target" type="button" data-slot="6"></button>
-                  <button class="signal-target" type="button" data-slot="7"></button>
-                  <button class="signal-target" type="button" data-slot="8"></button>
+                  <button class="signal-target" type="button" data-slot="0">Box 1</button>
+                  <button class="signal-target" type="button" data-slot="1">Box 2</button>
+                  <button class="signal-target" type="button" data-slot="2">Box 3</button>
+                  <button class="signal-target" type="button" data-slot="3">Box 4</button>
+                  <button class="signal-target" type="button" data-slot="4">Box 5</button>
+                  <button class="signal-target" type="button" data-slot="5">Box 6</button>
+                  <button class="signal-target" type="button" data-slot="6">Box 7</button>
+                  <button class="signal-target" type="button" data-slot="7">Box 8</button>
+                  <button class="signal-target" type="button" data-slot="8">Box 9</button>
                 </div>
               </section>
 
@@ -655,6 +992,17 @@
                 Complete setup and one returning check to calculate a result.
               </p>
             </div>
+          </div>
+
+          <div class="automation-card" id="automation-card">
+            <div>
+              <span>Automation risk</span>
+              <strong id="automation-level">Not assessed</strong>
+            </div>
+            <p id="automation-explanation">
+              Identity similarity and automation risk are evaluated
+              separately.
+            </p>
           </div>
 
           <details class="signal-disclosure">
@@ -787,6 +1135,51 @@
           </details>
         </aside>
       </div>
+
+        </section>
+
+    <section
+      class="terminal-view account-workspace standalone-app-view"
+      id="account-workspace"
+      data-app-section="account"
+      aria-labelledby="account-workspace-title"
+    >
+          <div class="standalone-view-bar">
+            <a class="terminal-logo" href="/" aria-label="Odysseus dashboard">
+              <span class="terminal-logo-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <polyline points="2 12 6 12 9 3 15 21 18 12 22 12"></polyline>
+                </svg>
+              </span>
+              <span>Odysseus</span>
+            </a>
+            <nav class="standalone-view-nav" aria-label="Application views">
+              <button type="button" data-app-view-target="dashboard">
+                Dashboard
+              </button>
+              <button type="button" data-app-view-target="session">
+                Session check
+              </button>
+              <button type="button" data-app-view-target="account">
+                Account security
+              </button>
+            </nav>
+          </div>
+          <div
+            class="terminal-view-heading"
+            id="security-center-heading"
+            tabindex="-1"
+          >
+            <div>
+              <p class="terminal-kicker">Account controls</p>
+              <h1 id="account-workspace-title">Security center</h1>
+              <p>
+                Review devices, access methods, recovery tools, notifications,
+                and account controls.
+              </p>
+            </div>
+            <span class="terminal-status-chip">Server enforced</span>
+          </div>
 
       <section
         class="security-center"
@@ -1140,11 +1533,12 @@
           </p>
         </div>
       </section>
-    </main>
+        </section>
+    </div>
 
     <footer>
-      <span>Odysseus account console</span>
-      <span>Prototype build</span>
+      <span>Odysseus secure market terminal</span>
+      <span>Prototype build with demo market data</span>
     </footer>
   </body>
 </html>

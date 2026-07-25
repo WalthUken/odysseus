@@ -5,6 +5,7 @@ const { ValidationError } = require("./behavior");
 const MAX_DIAGNOSTIC_DURATION_MS = 10 * 60 * 1_000;
 const MAX_DIAGNOSTIC_EVENTS = 1_000;
 const MAX_DIAGNOSTIC_WORDS = 40;
+const MAX_CORRECTION_ROLLBACK = 10_000;
 
 function isPlainObject(value) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
@@ -83,13 +84,67 @@ function validateWords(words, name) {
   });
 }
 
-function validateField(value, name) {
+function validateCorrectionSummary(value, name) {
   if (!isPlainObject(value)) {
     throw new ValidationError(`${name} must be an object`);
   }
   requireAllowedKeys(
     value,
-    new Set(["durationMs", "wordCount", "words"]),
+    new Set(["total", "deletions", "replacements", "largestRollback"]),
+    name
+  );
+  const summary = {
+    total: boundedNumber(
+      value.total,
+      `${name}.total`,
+      MAX_DIAGNOSTIC_EVENTS,
+      true
+    ),
+    deletions: boundedNumber(
+      value.deletions,
+      `${name}.deletions`,
+      MAX_DIAGNOSTIC_EVENTS,
+      true
+    ),
+    replacements: boundedNumber(
+      value.replacements,
+      `${name}.replacements`,
+      MAX_DIAGNOSTIC_EVENTS,
+      true
+    ),
+    largestRollback: boundedNumber(
+      value.largestRollback,
+      `${name}.largestRollback`,
+      MAX_CORRECTION_ROLLBACK,
+      true
+    ),
+  };
+  if (summary.total !== summary.deletions + summary.replacements) {
+    throw new ValidationError(
+      `${name}.total must match deletions and replacements`
+    );
+  }
+  return summary;
+}
+
+function validateField(value, name, version) {
+  if (!isPlainObject(value)) {
+    throw new ValidationError(`${name} must be an object`);
+  }
+  const correctionKeys = [
+    "corrections",
+    "deletions",
+    "replacements",
+    "largestRollback",
+  ];
+  requireAllowedKeys(
+    value,
+    new Set([
+      "durationMs",
+      "wordCount",
+      "words",
+      ...(version === 2 ? correctionKeys : []),
+    ]),
     name
   );
   const words = validateWords(value.words, `${name}.words`);
@@ -102,7 +157,7 @@ function validateField(value, name) {
   if (wordCount !== words.length) {
     throw new ValidationError(`${name}.wordCount must match its word timings`);
   }
-  return {
+  const validated = {
     durationMs: boundedNumber(
       value.durationMs,
       `${name}.durationMs`,
@@ -112,6 +167,44 @@ function validateField(value, name) {
     wordCount,
     words,
   };
+  if (version === 2) {
+    const corrections = {
+      corrections: boundedNumber(
+        value.corrections,
+        `${name}.corrections`,
+        MAX_DIAGNOSTIC_EVENTS,
+        true
+      ),
+      deletions: boundedNumber(
+        value.deletions,
+        `${name}.deletions`,
+        MAX_DIAGNOSTIC_EVENTS,
+        true
+      ),
+      replacements: boundedNumber(
+        value.replacements,
+        `${name}.replacements`,
+        MAX_DIAGNOSTIC_EVENTS,
+        true
+      ),
+      largestRollback: boundedNumber(
+        value.largestRollback,
+        `${name}.largestRollback`,
+        MAX_CORRECTION_ROLLBACK,
+        true
+      ),
+    };
+    if (
+      corrections.corrections
+      !== corrections.deletions + corrections.replacements
+    ) {
+      throw new ValidationError(
+        `${name}.corrections must match deletions and replacements`
+      );
+    }
+    Object.assign(validated, corrections);
+  }
+  return validated;
 }
 
 function validateTypingDiagnostics(value, rounds) {
@@ -121,6 +214,10 @@ function validateTypingDiagnostics(value, rounds) {
   if (!isPlainObject(value)) {
     throw new ValidationError("diagnostics must be an object");
   }
+  if (value.version !== 1 && value.version !== 2) {
+    throw new ValidationError("diagnostics.version must be 1 or 2");
+  }
+  const version = value.version;
   requireAllowedKeys(
     value,
     new Set([
@@ -132,14 +229,12 @@ function validateTypingDiagnostics(value, rounds) {
       "cadencePerMinute",
       "pauses",
       "bursts",
+      ...(version === 2 ? ["corrections"] : []),
       "guided",
       "freeTyping",
     ]),
     "diagnostics"
   );
-  if (value.version !== 1) {
-    throw new ValidationError("diagnostics.version must be 1");
-  }
   if (typeof value.missionId !== "string") {
     throw new ValidationError("diagnostics.missionId must be a string");
   }
@@ -163,20 +258,24 @@ function validateTypingDiagnostics(value, rounds) {
     "diagnostics.bursts"
   );
 
-  const guided = validateField(value.guided, "diagnostics.guided");
+  const guided = validateField(
+    value.guided,
+    "diagnostics.guided",
+    version
+  );
   const freeTyping = validateField(
     value.freeTyping,
-    "diagnostics.freeTyping"
+    "diagnostics.freeTyping",
+    version
   );
-  const expectedWords = round.prompt.split(/\s+/);
-  if (guided.words.length > expectedWords.length + 2) {
-    throw new ValidationError(
-      "diagnostics.guided contains too many word timings"
-    );
-  }
-
-  return {
-    version: 1,
+  const inputEventCount = boundedNumber(
+    value.inputEventCount,
+    "diagnostics.inputEventCount",
+    MAX_DIAGNOSTIC_EVENTS,
+    true
+  );
+  const validated = {
+    version,
     missionId: round.id,
     totalDurationMs: boundedNumber(
       value.totalDurationMs,
@@ -184,12 +283,7 @@ function validateTypingDiagnostics(value, rounds) {
       MAX_DIAGNOSTIC_DURATION_MS,
       true
     ),
-    inputEventCount: boundedNumber(
-      value.inputEventCount,
-      "diagnostics.inputEventCount",
-      MAX_DIAGNOSTIC_EVENTS,
-      true
-    ),
+    inputEventCount,
     keyPressCount: boundedNumber(
       value.keyPressCount,
       "diagnostics.keyPressCount",
@@ -237,6 +331,31 @@ function validateTypingDiagnostics(value, rounds) {
     guided,
     freeTyping,
   };
+  if (version === 2) {
+    const corrections = validateCorrectionSummary(
+      value.corrections,
+      "diagnostics.corrections"
+    );
+    if (
+      corrections.total !== guided.corrections + freeTyping.corrections
+      || corrections.deletions !== guided.deletions + freeTyping.deletions
+      || corrections.replacements
+        !== guided.replacements + freeTyping.replacements
+      || corrections.largestRollback
+        !== Math.max(guided.largestRollback, freeTyping.largestRollback)
+    ) {
+      throw new ValidationError(
+        "diagnostics.corrections must match guided and free typing totals"
+      );
+    }
+    if (corrections.total > inputEventCount) {
+      throw new ValidationError(
+        "diagnostics.corrections.total cannot exceed inputEventCount"
+      );
+    }
+    validated.corrections = corrections;
+  }
+  return validated;
 }
 
 function roundNumber(value, places = 2) {
@@ -324,11 +443,10 @@ function slowestWords(typing, round) {
       freeTyping: [],
     };
   }
-  const promptWords = round.prompt.split(/\s+/);
   const guided = typing.guided.words
     .map((word) => ({
       ...word,
-      label: promptWords[word.index - 1] || `Guided word ${word.index}`,
+      label: `Response word ${word.index}`,
     }))
     .sort((left, right) => right.durationMs - left.durationMs)
     .slice(0, 5);
@@ -344,6 +462,23 @@ function slowestWords(typing, round) {
 
 function buildBehaviorDiagnostics(vector, template, typing, round) {
   const slowWords = slowestWords(typing, round);
+  const correctionSummary = typing && typing.version === 2
+    ? {
+        ...typing.corrections,
+        guided: {
+          total: typing.guided.corrections,
+          deletions: typing.guided.deletions,
+          replacements: typing.guided.replacements,
+          largestRollback: typing.guided.largestRollback,
+        },
+        freeTyping: {
+          total: typing.freeTyping.corrections,
+          deletions: typing.freeTyping.deletions,
+          replacements: typing.freeTyping.replacements,
+          largestRollback: typing.freeTyping.largestRollback,
+        },
+      }
+    : null;
   return {
     keyboard: {
       averageKeyHoldMs: roundNumber(vector.dwellMean),
@@ -384,6 +519,7 @@ function buildBehaviorDiagnostics(vector, template, typing, round) {
           freeTypingDurationMs: typing.freeTyping.durationMs,
           guidedWordCount: typing.guided.wordCount,
           freeWordCount: typing.freeTyping.wordCount,
+          corrections: correctionSummary,
         }
       : null,
     slowWords,
@@ -395,6 +531,7 @@ module.exports = {
   MAX_DIAGNOSTIC_DURATION_MS,
   MAX_DIAGNOSTIC_EVENTS,
   MAX_DIAGNOSTIC_WORDS,
+  MAX_CORRECTION_ROLLBACK,
   buildBehaviorDiagnostics,
   validateTypingDiagnostics,
 };

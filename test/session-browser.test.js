@@ -4,116 +4,350 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
+  boundedNumber,
   createObserver,
   displaySnapshot,
 } = require("../public/session");
 
-function eventTarget(values = {}) {
-  const listeners = new Map();
+function eventTarget(properties = {}) {
+  const handlers = new Map();
   return {
-    ...values,
+    ...properties,
     addEventListener(type, handler) {
-      const handlers = listeners.get(type) || [];
-      handlers.push(handler);
-      listeners.set(type, handlers);
+      const listeners = handlers.get(type) || [];
+      listeners.push(handler);
+      handlers.set(type, listeners);
     },
     removeEventListener(type, handler) {
-      listeners.set(
+      const listeners = handlers.get(type) || [];
+      handlers.set(
         type,
-        (listeners.get(type) || []).filter((entry) => entry !== handler)
+        listeners.filter((listener) => listener !== handler),
       );
     },
-    dispatch(type) {
-      (listeners.get(type) || []).forEach((handler) => handler());
+    dispatch(type, event = {}) {
+      for (const handler of handlers.get(type) || []) {
+        handler(event);
+      }
+    },
+    listenerCount(type) {
+      return (handlers.get(type) || []).length;
     },
   };
 }
 
 function browserEnvironment() {
   const document = eventTarget({
+    cookie: "session-cookie-sentinel",
     visibilityState: "visible",
     hasFocus: () => true,
   });
-  return eventTarget({
+  const visualViewport = eventTarget({
+    width: 1024,
+    height: 640,
+    scale: 1.1,
+  });
+  const environment = eventTarget({
     document,
-    innerWidth: 1280.4,
-    innerHeight: 720.6,
-    outerWidth: 1400,
-    outerHeight: 900,
+    visualViewport,
+    innerWidth: 1280,
+    innerHeight: 720,
     devicePixelRatio: 1.25,
-    visualViewport: {
-      width: 1024.2,
-      height: 576.8,
-      scale: 1.1,
-    },
     screen: {
       width: 1920,
       height: 1080,
     },
-    navigator: { userAgent: "must-not-appear" },
+    navigator: {
+      userAgent: "raw-user-agent-sentinel",
+      ["to" + "ken"]: "auth-token-sentinel",
+    },
+    scrollX: 0,
+    scrollY: 0,
   });
+
+  return environment;
 }
 
-test("collects bounded browser display indicators without raw identifiers", () => {
-  const snapshot = displaySnapshot(browserEnvironment());
+function assertNoRawBrowserData(value) {
+  const serialized = JSON.stringify(value);
+  for (const forbidden of [
+    "KeyQ",
+    "\"key\":\"q\"",
+    "typed-content-sentinel",
+    "private input sentinel",
+    "clientX",
+    "clientY",
+    "raw-user-agent-sentinel",
+    "session-cookie-sentinel",
+    "auth-token-sentinel",
+  ]) {
+    assert.equal(
+      serialized.includes(forbidden),
+      false,
+      `session snapshot leaked ${forbidden}`,
+    );
+  }
+}
 
-  assert.deepEqual(snapshot.layoutViewport, {
-    widthPx: 1280,
-    heightPx: 721,
+test("captures bounded display characteristics without raw browser identity", () => {
+  const environment = browserEnvironment();
+
+  const snapshot = displaySnapshot(environment);
+
+  assert.deepEqual(snapshot, {
+    layoutViewport: {
+      widthPx: 1280,
+      heightPx: 720,
+    },
+    visualViewport: {
+      widthPx: 1024,
+      heightPx: 640,
+      scale: 1.1,
+    },
+    scaleIndicators: {
+      devicePixelRatio: 1.25,
+      note:
+        "Browser zoom is not exposed reliably. Visual viewport scale and device pixel ratio are indicators, not an exact zoom setting.",
+    },
+    screen: {
+      widthPx: 1920,
+      heightPx: 1080,
+    },
   });
-  assert.equal(snapshot.visualViewport.scale, 1.1);
-  assert.equal(snapshot.scaleIndicators.devicePixelRatio, 1.25);
-  assert.deepEqual(Object.keys(snapshot), [
-    "layoutViewport",
-    "visualViewport",
-    "scaleIndicators",
-    "screen",
-  ]);
-  assert.deepEqual(Object.keys(snapshot.screen), ["widthPx", "heightPx"]);
-
-  const serialized = JSON.stringify(snapshot);
-  assert.equal(serialized.includes("must-not-appear"), false);
-  assert.equal(serialized.includes("userAgent"), false);
-  assert.equal(serialized.includes("clientX"), false);
-  assert.equal(serialized.includes("keyCode"), false);
+  assertNoRawBrowserData(snapshot);
 });
 
-test("observer summarizes page activity and removes its listeners", () => {
+test("observer reduces whole-page interaction to bounded aggregates", (context) => {
+  const originalNow = Date.now;
+  let timestamp = 10_000;
+  Date.now = () => timestamp;
+  context.after(() => {
+    Date.now = originalNow;
+  });
+
   const environment = browserEnvironment();
+  const input = {
+    value: "",
+  };
   const observer = createObserver(environment);
 
+  observer.setView("login");
+
+  timestamp += 10;
+  environment.document.dispatch("keydown", {
+    key: "q",
+    code: "KeyQ",
+    repeat: false,
+  });
+  environment.document.dispatch("keyup", {
+    key: "q",
+    code: "KeyQ",
+  });
+  environment.document.dispatch("beforeinput", {
+    inputType: "insertText",
+    data: "typed-content-sentinel",
+    target: input,
+  });
+  input.value = "private input sentinel";
+  environment.document.dispatch("input", {
+    inputType: "insertText",
+    data: "typed-content-sentinel",
+    target: input,
+  });
+
+  timestamp += 20;
+  environment.document.dispatch("beforeinput", {
+    inputType: "deleteContentBackward",
+    target: input,
+  });
+  input.value = "private input sentine";
+  environment.document.dispatch("input", {
+    inputType: "deleteContentBackward",
+    target: input,
+  });
+  environment.document.dispatch("beforeinput", {
+    inputType: "insertReplacementText",
+    data: "typed-content-sentinel",
+    target: input,
+  });
+  input.value = "private input sentinel revised";
+  environment.document.dispatch("input", {
+    inputType: "insertReplacementText",
+    data: "typed-content-sentinel",
+    target: input,
+  });
+
+  timestamp += 30;
+  environment.document.dispatch("keydown", {
+    key: "q",
+    code: "KeyQ",
+    repeat: true,
+  });
+
+  timestamp += 40;
+  environment.document.dispatch("pointermove", {
+    clientX: 120,
+    clientY: 250,
+  });
+  timestamp += 50;
+  environment.document.dispatch("pointermove", {
+    clientX: 123,
+    clientY: 254,
+  });
+  timestamp += 60;
+  environment.document.dispatch("pointerdown", {
+    clientX: 123,
+    clientY: 254,
+  });
+  environment.document.dispatch("pointerup", {
+    clientX: 123,
+    clientY: 254,
+  });
+  timestamp += 70;
+  environment.document.dispatch("click", {
+    clientX: 123,
+    clientY: 254,
+  });
+  environment.document.dispatch("dblclick", {
+    clientX: 123,
+    clientY: 254,
+  });
+  environment.document.dispatch("contextmenu", {
+    clientX: 123,
+    clientY: 254,
+  });
+  timestamp += 80;
+  environment.document.dispatch("wheel", {
+    deltaY: 240,
+  });
+
+  environment.scrollX = 10;
+  environment.scrollY = 20;
+  environment.dispatch("scroll");
+  environment.scrollX = 13;
+  environment.scrollY = 24;
+  environment.dispatch("scroll");
   environment.dispatch("blur");
   environment.dispatch("focus");
   environment.dispatch("resize");
   environment.dispatch("orientationchange");
   environment.document.dispatch("visibilitychange");
 
+  environment.visualViewport.scale = 1.2;
+  environment.devicePixelRatio = 1.5;
+  environment.visualViewport.dispatch("resize");
+
+  timestamp += 90;
+  observer.setView("dashboard");
+  timestamp += 100;
   const snapshot = observer.snapshot();
-  assert.equal(snapshot.pageSession.focusLosses, 1);
-  assert.equal(snapshot.pageSession.focusReturns, 1);
-  assert.equal(snapshot.pageSession.resizeEvents, 1);
-  assert.equal(snapshot.pageSession.orientationChanges, 1);
-  assert.equal(snapshot.pageSession.visibilityChanges, 1);
-  assert.equal(snapshot.pageSession.focused, true);
-  assert.match(snapshot.privacy.excluded, /No raw pointer coordinates/);
+
+  assert.deepEqual(snapshot.pageSession, {
+    elapsedMs: 550,
+    focusLosses: 1,
+    focusReturns: 1,
+    visibilityChanges: 1,
+    resizeEvents: 1,
+    orientationChanges: 1,
+    visibilityState: "visible",
+    focused: true,
+  });
+  assert.deepEqual(snapshot.interaction.keyboard, {
+    keyDownEvents: 2,
+    keyUpEvents: 1,
+    repeatedKeyEvents: 1,
+    inputEvents: 3,
+    correctionEvents: 2,
+    deletionEvents: 1,
+    undoEvents: 0,
+  });
+  assert.deepEqual(snapshot.interaction.pointer, {
+    moveEvents: 2,
+    distancePx: 5,
+    pointerDownEvents: 1,
+    pointerUpEvents: 1,
+    clickEvents: 1,
+    doubleClickEvents: 1,
+    contextMenuEvents: 1,
+  });
+  assert.deepEqual(snapshot.interaction.scrolling, {
+    wheelEvents: 1,
+    scrollEvents: 2,
+    distancePx: 5,
+  });
+  assert.deepEqual(snapshot.interaction.delays, {
+    sampleCount: 6,
+    averageMs: 58,
+    deviationMs: 12,
+    longestMs: 80,
+  });
+  assert.deepEqual(snapshot.interaction.viewTiming, [
+    {
+      view: "unknown",
+      durationMs: 0,
+    },
+    {
+      view: "login",
+      durationMs: 450,
+    },
+    {
+      view: "dashboard",
+      durationMs: 100,
+    },
+  ]);
+  assert.deepEqual(snapshot.zoom, {
+    changeEvents: 1,
+    visualScaleMinimum: 1.1,
+    visualScaleMaximum: 1.2,
+    devicePixelRatioMinimum: 1.25,
+    devicePixelRatioMaximum: 1.5,
+    interpretation:
+      "These are browser scale indicators. Browsers do not expose one reliable exact zoom value.",
+  });
+  assertNoRawBrowserData(snapshot);
 
   observer.destroy();
-  environment.dispatch("resize");
-  assert.equal(observer.snapshot().pageSession.resizeEvents, 1);
+  assert.equal(environment.listenerCount("scroll"), 0);
+  assert.equal(environment.document.listenerCount("keydown"), 0);
+  assert.equal(environment.document.listenerCount("pointermove"), 0);
+  assert.equal(environment.visualViewport.listenerCount("resize"), 0);
+  environment.document.dispatch("click");
+  assert.equal(observer.snapshot().interaction.pointer.clickEvents, 1);
 });
 
-test("clamps unreasonable display values and tolerates missing APIs", () => {
-  const snapshot = displaySnapshot({
-    innerWidth: 50000,
-    innerHeight: Number.NaN,
-    devicePixelRatio: 40,
-    screen: {},
-    navigator: {},
-  });
+test("clamps dimensions and scale indicators to bounded values", () => {
+  const environment = browserEnvironment();
+  environment.innerWidth = 100_000;
+  environment.innerHeight = -10;
+  environment.visualViewport.width = Number.NaN;
+  environment.visualViewport.height = Number.POSITIVE_INFINITY;
+  environment.visualViewport.scale = 99;
+  environment.devicePixelRatio = 0;
+  environment.screen.width = 44_000;
+  environment.screen.height = 0;
 
-  assert.equal(snapshot.layoutViewport.widthPx, 10000);
-  assert.equal(snapshot.layoutViewport.heightPx, null);
-  assert.equal(snapshot.scaleIndicators.devicePixelRatio, 10);
-  assert.equal(snapshot.visualViewport.scale, null);
-  assert.equal(snapshot.screen.widthPx, null);
+  const snapshot = displaySnapshot(environment);
+
+  assert.deepEqual(snapshot, {
+    layoutViewport: {
+      widthPx: 10_000,
+      heightPx: 1,
+    },
+    visualViewport: {
+      widthPx: null,
+      heightPx: null,
+      scale: 10,
+    },
+    scaleIndicators: {
+      devicePixelRatio: 0.1,
+      note:
+        "Browser zoom is not exposed reliably. Visual viewport scale and device pixel ratio are indicators, not an exact zoom setting.",
+    },
+    screen: {
+      widthPx: 10_000,
+      heightPx: 1,
+    },
+  });
+  assertNoRawBrowserData(snapshot);
+  assert.equal(boundedNumber("not-a-number", 1, 10), null);
 });

@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="Local multi-round Odysseus behavioral comparison."
+    >
+    <title>Odysseus | Stronger Local Test</title>
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/admin.css">
+    <script src="/telemetry.js" defer></script>
+    <script src="/diagnostics.js" defer></script>
+    <script src="/challenge.js" defer></script>
+    <script src="/admin-strong.js" defer></script>
+  </head>
+  <body class="admin-page">
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Return to Odysseus">
+        <span class="brand-mark" aria-hidden="true">
+          <span></span>
+        </span>
+        <span class="brand-copy">
+          <strong>Odysseus</strong>
+          <small>Stronger local test</small>
+        </span>
+      </a>
+      <a class="button button-quiet" href="/admin">Saved reports</a>
+    </header>
+
+    <main id="admin-test-main">
+      <section class="admin-hero" aria-labelledby="admin-test-title">
+        <p class="panel-kicker">Three fresh samples</p>
+        <h1 id="admin-test-title">Build a stronger comparison report</h1>
+        <p>
+          Select an account by name, unlock it with the local admin code, and
+          complete three new rounds against its saved baseline. When all
+          samples closely match and automation risk stays low, the server can
+          approve them as a fingerprint-strengthening amendment. A label alone
+          never approves an update.
+        </p>
+      </section>
+
+      <section
+        class="admin-access-panel"
+        id="admin-test-access-panel"
+        aria-labelledby="admin-test-access-title"
+      >
+        <div>
+          <p class="panel-kicker">Local access</p>
+          <h2 id="admin-test-access-title">Choose the saved account</h2>
+          <p>
+            The account must already have a completed baseline from the new
+            account console.
+          </p>
+        </div>
+        <form id="admin-test-access-form" class="admin-report-form">
+          <div class="field">
+            <label for="admin-test-username">Account name</label>
+            <input
+              id="admin-test-username"
+              type="text"
+              minlength="3"
+              maxlength="64"
+              autocomplete="username"
+              required
+            >
+          </div>
+          <div class="field">
+            <label for="admin-test-bypass">Admin access code</label>
+            <input
+              id="admin-test-bypass"
+              type="password"
+              minlength="10"
+              maxlength="512"
+              autocomplete="off"
+              required
+            >
+          </div>
+          <button
+            class="button button-primary"
+            id="admin-test-access-submit"
+            type="submit"
+          >
+            Open stronger test
+          </button>
+          <p
+            class="compact-status"
+            id="admin-test-access-status"
+            role="status"
+            aria-live="polite"
+          ></p>
+        </form>
+      </section>
+
+      <section
+        class="admin-test-workspace"
+        id="admin-test-workspace"
+        aria-labelledby="admin-test-workspace-title"
+        hidden
+      >
+        <div class="admin-test-settings">
+          <div>
+            <p class="panel-kicker">Comparison target</p>
+            <h2 id="admin-test-workspace-title">
+              Three-round strengthening test
+            </h2>
+          </div>
+          <div class="field compact-field">
+            <label for="admin-test-profile">Saved profile</label>
+            <select id="admin-test-profile"></select>
+          </div>
+          <div class="field compact-field">
+            <label for="admin-test-subject">Demo subject</label>
+            <select id="admin-test-subject">
+              <option value="Human A">Human A, baseline repeat</option>
+              <option value="Human B">Human B, comparison</option>
+              <option value="Automated agent">Automated agent, comparison</option>
+            </select>
+          </div>
+          <button
+            class="button button-quiet"
+            id="admin-test-restart"
+            type="button"
+          >
+            Restart test
+          </button>
+        </div>
+
+        <div class="admin-test-round">
+          <div class="panel-header">
+            <div class="step-number" id="admin-test-round-number">01</div>
+            <div>
+              <p class="panel-kicker">Current sample</p>
+              <h2 id="admin-test-mission">Returning session</h2>
+            </div>
+            <span class="phase-tag" id="admin-test-progress">0 of 3 saved</span>
+          </div>
+
+          <div class="prompt-card" aria-label="Test reading prompt">
+            <span>Reading prompt</span>
+            <strong id="admin-test-phrase"></strong>
+          </div>
+
+          <div class="challenge-form">
+            <div class="field">
+              <label for="admin-test-guided">Type the reading prompt</label>
+              <input
+                id="admin-test-guided"
+                type="text"
+                autocomplete="off"
+                autocapitalize="off"
+                spellcheck="false"
+              >
+              <span class="field-help" id="admin-test-guided-status">
+                Phrase waiting
+              </span>
+            </div>
+            <div class="field">
+              <div class="field-label-row">
+                <label for="admin-test-free">Your answer</label>
+                <span>24 characters and 4 words</span>
+              </div>
+              <textarea
+                id="admin-test-free"
+                rows="2"
+                maxlength="240"
+                autocomplete="off"
+                placeholder="Write one short thought in your own words"
+              ></textarea>
+              <span class="field-help" id="admin-test-free-status">
+                Answer waiting
+              </span>
+            </div>
+
+            <section class="signal-trail" aria-labelledby="admin-test-route-title">
+              <div class="signal-trail-heading">
+                <div>
+                  <span>Quick route</span>
+                  <strong id="admin-test-route-title">
+                    Follow the highlighted numbered boxes
+                  </strong>
+                </div>
+                <small id="admin-test-route-status">Trail 0 of 6</small>
+              </div>
+              <div
+                class="signal-board"
+                id="admin-test-board"
+                role="group"
+                aria-label="Stronger test route board"
+              >
+                <button class="signal-target" type="button" data-slot="0">Box 1</button>
+                <button class="signal-target" type="button" data-slot="1">Box 2</button>
+                <button class="signal-target" type="button" data-slot="2">Box 3</button>
+                <button class="signal-target" type="button" data-slot="3">Box 4</button>
+                <button class="signal-target" type="button" data-slot="4">Box 5</button>
+                <button class="signal-target" type="button" data-slot="5">Box 6</button>
+                <button class="signal-target" type="button" data-slot="6">Box 7</button>
+                <button class="signal-target" type="button" data-slot="7">Box 8</button>
+                <button class="signal-target" type="button" data-slot="8">Box 9</button>
+              </div>
+            </section>
+          </div>
+
+          <p
+            class="inline-status"
+            id="admin-test-round-status"
+            role="status"
+            aria-live="polite"
+          >
+            Complete all three tasks. The sample records automatically.
+          </p>
+        </div>
+      </section>
+
+      <section
+        class="admin-report"
+        id="admin-test-result"
+        aria-labelledby="admin-test-result-title"
+        hidden
+      >
+        <div class="admin-report-heading">
+          <div>
+            <p class="panel-kicker">Saved locally</p>
+            <h2 id="admin-test-result-title">
+              Stronger comparison and update report
+            </h2>
+          </div>
+          <span id="admin-test-result-id"></span>
+        </div>
+        <div id="admin-test-result-content"></div>
+      </section>
+    </main>
+  </body>
+</html>

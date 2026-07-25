@@ -37,6 +37,11 @@
       startedAt: null,
       lastAt: null,
       events: [],
+      corrections: 0,
+      deletions: 0,
+      replacements: 0,
+      largestRollback: 0,
+      previousLength: 0,
     };
   }
 
@@ -46,6 +51,10 @@
         durationMs: 0,
         wordCount: 0,
         words: [],
+        corrections: 0,
+        deletions: 0,
+        replacements: 0,
+        largestRollback: 0,
       };
     }
 
@@ -71,6 +80,10 @@
       durationMs: Math.max(0, Math.round(field.lastAt - field.startedAt)),
       wordCount: words.length,
       words,
+      corrections: field.corrections,
+      deletions: field.deletions,
+      replacements: field.replacements,
+      largestRollback: field.largestRollback,
     };
   }
 
@@ -91,7 +104,7 @@
       return this;
     }
 
-    record(kind, value) {
+    record(kind, value, options) {
       if (!Object.hasOwn(this.fields, kind)) {
         throw new TypeError("Typing diagnostic kind must be guided or free");
       }
@@ -101,9 +114,29 @@
       }
 
       const field = this.fields[kind];
+      const supplied = options || {};
+      const currentLength = Array.from(String(value || "")).length;
+      const inputType =
+        typeof supplied.inputType === "string" ? supplied.inputType : "";
       if (field.startedAt === null) {
         field.startedAt = timestamp;
       }
+      if (currentLength < field.previousLength) {
+        field.corrections += 1;
+        field.deletions += 1;
+        field.largestRollback = Math.max(
+          field.largestRollback,
+          field.previousLength - currentLength
+        );
+      } else if (
+        inputType === "insertReplacementText" ||
+        inputType === "historyUndo" ||
+        inputType === "historyRedo"
+      ) {
+        field.corrections += 1;
+        field.replacements += 1;
+      }
+      field.previousLength = currentLength;
       field.lastAt = timestamp;
       field.events.push({
         at: timestamp,
@@ -144,8 +177,10 @@
         : eventTimes.length;
       const burstCount = eventTimes.length ? pauses.length + 1 : 0;
 
+      const guided = summarizeField(this.fields.guided);
+      const freeTyping = summarizeField(this.fields.free);
       return {
-        version: 1,
+        version: 2,
         missionId: String(supplied.missionId || "").slice(0, 64),
         totalDurationMs: Math.round(totalDurationMs),
         inputEventCount: eventTimes.length,
@@ -166,8 +201,17 @@
           averageEvents:
             burstCount > 0 ? round(eventTimes.length / burstCount) : 0,
         },
-        guided: summarizeField(this.fields.guided),
-        freeTyping: summarizeField(this.fields.free),
+        corrections: {
+          total: guided.corrections + freeTyping.corrections,
+          deletions: guided.deletions + freeTyping.deletions,
+          replacements: guided.replacements + freeTyping.replacements,
+          largestRollback: Math.max(
+            guided.largestRollback,
+            freeTyping.largestRollback
+          ),
+        },
+        guided,
+        freeTyping,
       };
     }
   }

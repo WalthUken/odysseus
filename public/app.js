@@ -14,10 +14,20 @@
     authPassword: "auth-password",
     authSubmit: "auth-submit",
     authStatus: "auth-status",
+    behaviorAccessWarning: "behavior-access-warning",
+    behaviorWarningTitle: "behavior-warning-title",
+    behaviorWarningSummary: "behavior-warning-summary",
+    behaviorWarningIdentity: "behavior-warning-identity",
+    behaviorWarningAutomation: "behavior-warning-automation",
+    behaviorWarningDecision: "behavior-warning-decision",
+    behaviorWarningReasonList: "behavior-warning-reason-list",
+    simulatedIpWarning: "simulated-ip-warning",
+    behaviorWarningRetry: "behavior-warning-retry",
     currentUserPanel: "current-user-panel",
     currentUser: "current-user",
     logoutButton: "logout-button",
     profileId: "profile-id",
+    demoSubjectLabel: "demo-subject-label",
     resetProfile: "reset-profile",
     enrollmentForm: "enrollment-form",
     enrollmentRoundTag: "enrollment-round-tag",
@@ -47,6 +57,9 @@
     trustScore: "trust-score",
     trustFill: "trust-fill",
     decisionReason: "decision-reason",
+    automationCard: "automation-card",
+    automationLevel: "automation-level",
+    automationExplanation: "automation-explanation",
     metricDwell: "metric-dwell",
     metricFlight: "metric-flight",
     metricPointer: "metric-pointer",
@@ -59,11 +72,18 @@
     actionStatus: "action-status",
     securityReport: "security-report",
     actionResult: "action-result",
+    dashboardShell: "dashboard-shell",
+    dashboardUser: "dashboard-user",
+    dashboardAvatar: "dashboard-avatar",
+    dashboardTheme: "dashboard-theme",
+    dashboardOverview: "dashboard-overview",
   });
 
   const elements = {};
   const enrollmentSamples = [];
   let collector = null;
+  let authCollector = null;
+  let authDiagnostics = null;
   let typingDiagnostics = null;
   let enrolled = false;
   let completedEnrollmentSamples = 0;
@@ -81,6 +101,7 @@
   let verificationRoundIndex = 0;
   let enrollmentTrailProgress = 0;
   let verificationTrailProgress = 0;
+  let currentAppView = "login";
   const autoSubmitTimers = {
     enrollment: null,
     verification: null,
@@ -114,6 +135,69 @@
 
   function isAuthenticated() {
     return Boolean(currentUser);
+  }
+
+  function restartSessionObserver(view) {
+    if (sessionObserver) {
+      sessionObserver.destroy();
+    }
+    sessionObserver = global.OdysseusSession.createObserver(global);
+    sessionObserver.setView(view || "unknown");
+  }
+
+  function setAppView(view, telemetryView) {
+    const allowed = new Set(["login", "session", "dashboard", "account"]);
+    const nextView = allowed.has(view) ? view : "login";
+    currentAppView = nextView;
+    global.document.body.dataset.appView = nextView;
+    elements.dashboardShell.hidden = nextView === "login";
+    global.document
+      .querySelectorAll("[data-app-view-target]")
+      .forEach((control) => {
+        const active = control.dataset.appViewTarget === nextView;
+        control.classList.toggle("is-active", active);
+        if (active) {
+          control.setAttribute("aria-current", "page");
+        } else {
+          control.removeAttribute("aria-current");
+        }
+      });
+    if (sessionObserver) {
+      sessionObserver.setView(telemetryView || nextView);
+    }
+  }
+
+  function navigateAppView(view) {
+    if (!isAuthenticated()) {
+      setAppView("login", "login");
+      elements.authUsername.focus();
+      return;
+    }
+    if (view === "dashboard") {
+      if (!enrolled) {
+        setAppView("session", "enrollment");
+        elements.enrollmentInput.focus();
+        return;
+      }
+      setAppView("dashboard", "dashboard");
+      elements.dashboardOverview.focus();
+      return;
+    }
+    if (view === "account") {
+      setAppView("account", "account");
+      const heading = global.document.getElementById(
+        "security-center-heading"
+      );
+      if (heading) {
+        heading.focus();
+      }
+      return;
+    }
+    setAppView("session", enrolled ? "verification" : "enrollment");
+    (enrolled
+      ? elements.verificationInput
+      : elements.enrollmentInput
+    ).focus();
   }
 
   function csrfToken() {
@@ -182,6 +266,205 @@
     return result.reason || result.message || "";
   }
 
+  function readableBehaviorValue(value, fallback) {
+    if (value === null || value === undefined || value === "") {
+      return fallback || "Not assessed";
+    }
+    return String(value)
+      .replace(/[_-]+/g, " ")
+      .replace(/\b\w/g, (character) => character.toUpperCase());
+  }
+
+  function behaviorDecisionFrom(value) {
+    const source = value && value.body ? value.body : value;
+    if (!source || typeof source !== "object") {
+      return null;
+    }
+    const decision =
+      source.behaviorDecision ||
+      source.loginBehaviorDecision ||
+      source.behaviorAssessment ||
+      source.error?.behaviorDecision;
+    return decision && typeof decision === "object" ? decision : null;
+  }
+
+  function behaviorReasonCodes(decision) {
+    const identity = decision?.identitySimilarity;
+    const automation = decision?.automationRisk;
+    const candidates = [
+      decision?.reasonCodes,
+      decision?.reasons,
+      identity?.reasonCodes,
+      identity?.reasons,
+      automation?.reasonCodes,
+      automation?.reasons,
+    ];
+    const values = [];
+    for (const candidate of candidates) {
+      if (Array.isArray(candidate)) {
+        values.push(...candidate);
+      }
+    }
+    return [...new Set(values.map((value) => String(value)).filter(Boolean))];
+  }
+
+  function behaviorDecisionAllowsAccess(decision) {
+    if (!decision) {
+      return true;
+    }
+    const value = String(
+      decision.decision || decision.outcome || decision.classification || ""
+    ).toLowerCase();
+    return ![
+      "deny",
+      "denied",
+      "review",
+      "step_up",
+      "step-up",
+      "suspicious_identity",
+      "automation_likely",
+    ].includes(value);
+  }
+
+  function authenticatedBehaviorMessage(username, decision) {
+    if (!decision) {
+      return `Signed in as ${username}.`;
+    }
+    const classification = String(
+      decision.classification || decision.identityClass || ""
+    ).toLowerCase();
+    const amendment = decision.amendment;
+    if (
+      amendment?.applied === true ||
+      amendment?.status === "applied"
+    ) {
+      return `Signed in as ${username}. The trusted match strengthened the saved fingerprint.`;
+    }
+    if (
+      amendment?.status === "candidate_recorded" ||
+      amendment?.status === "pending"
+    ) {
+      return `Signed in as ${username}. The trusted match was recorded as a future fingerprint amendment candidate.`;
+    }
+    if (classification === "baseline_missing") {
+      return `Signed in as ${username}. Complete the account questions to create the first saved fingerprint.`;
+    }
+    if (
+      classification === "trusted_return" ||
+      String(decision.decision || "").toLowerCase() === "allow"
+    ) {
+      return `Signed in as ${username}. Returning behavior matched the saved fingerprint.`;
+    }
+    return `Signed in as ${username}.`;
+  }
+
+  function showBehaviorWarning(decision) {
+    const identity = decision?.identitySimilarity || {};
+    const automation = decision?.automationRisk || {};
+    const automationClass = String(
+      automation.classification || automation.level || ""
+    ).toLowerCase();
+    const identityClass = String(
+      identity.classification || decision?.classification || ""
+    ).toLowerCase();
+    const reasonCodes = behaviorReasonCodes(decision);
+    const insufficientEvidence = [
+      "baseline_missing",
+      "insufficient_evidence",
+      "more_interaction_required",
+    ].includes(identityClass) || reasonCodes.some((code) => [
+      "BEHAVIOR_EVIDENCE_INSUFFICIENT",
+      "BEHAVIOR_EVIDENCE_REQUIRED",
+      "PROFILE_FEATURE_COVERAGE_INSUFFICIENT",
+    ].includes(String(code).toUpperCase()));
+    const likelyAutomation = automationClass === "automation_likely";
+    const title = insufficientEvidence
+      ? "More natural interaction is required"
+      : likelyAutomation
+        ? "Automated behavior requires review"
+        : "This sign-in did not match safely";
+    const summary = insufficientEvidence
+      ? "The server did not receive enough timing and pointer evidence to compare this sign-in safely. Try again using the form naturally."
+      : likelyAutomation
+        ? "The server detected several automation-like interaction signals and paused access."
+        : "The server found a meaningful difference from the saved account fingerprint and paused access.";
+
+    setText(elements.behaviorWarningTitle, title);
+    setText(elements.behaviorWarningSummary, summary);
+    setText(
+      elements.behaviorWarningIdentity,
+      readableBehaviorValue(
+        identity.classification || identity.decision,
+        "Review required"
+      )
+    );
+    setText(
+      elements.behaviorWarningAutomation,
+      readableBehaviorValue(
+        automation.classification || automation.level,
+        "Not assessed"
+      )
+    );
+    setText(
+      elements.behaviorWarningDecision,
+      readableBehaviorValue(
+        decision?.decision || decision?.outcome,
+        "Access paused"
+      )
+    );
+
+    elements.behaviorWarningReasonList.replaceChildren();
+    const visibleReasons = reasonCodes.length
+      ? reasonCodes
+      : [
+          insufficientEvidence
+            ? "MORE_INTERACTION_REQUIRED"
+            : "BEHAVIORAL_DIFFERENCE_REQUIRES_REVIEW",
+        ];
+    for (const reason of visibleReasons.slice(0, 8)) {
+      const item = global.document.createElement("li");
+      item.textContent = readableBehaviorValue(reason);
+      elements.behaviorWarningReasonList.append(item);
+    }
+
+    const simulated = decision?.simulatedIpRestriction;
+    elements.simulatedIpWarning.hidden = !(
+      simulated &&
+      simulated.displayed === true &&
+      simulated.enforced === false
+    );
+    elements.authPanel.hidden = true;
+    elements.behaviorAccessWarning.hidden = false;
+    const recovery = global.document.getElementById("account-recovery-panel");
+    if (recovery) {
+      recovery.hidden = true;
+    }
+    elements.behaviorAccessWarning.focus();
+  }
+
+  function closeBehaviorWarning() {
+    elements.behaviorAccessWarning.hidden = true;
+    elements.simulatedIpWarning.hidden = true;
+    elements.authPanel.hidden = false;
+    const recovery = global.document.getElementById("account-recovery-panel");
+    if (recovery) {
+      recovery.hidden = false;
+    }
+    if (authCollector) {
+      authCollector.reset();
+    }
+    if (authDiagnostics) {
+      authDiagnostics.reset();
+    }
+    elements.authPassword.value = "";
+    setInlineStatus(
+      elements.authStatus,
+      "Try again naturally, or use another approved account recovery method.",
+      "neutral"
+    );
+    elements.authUsername.focus();
+  }
+
   function challengeReferences(mode) {
     const enrollmentMode = mode === "enrollment";
     return {
@@ -247,39 +530,67 @@
 
   function challengeTextResult(mode) {
     const references = challengeReferences(mode);
-    return global.OdysseusChallenge.compareText(
-      references.input.value,
-      challengeRound(mode).prompt
+    return global.OdysseusChallenge.evaluateShortResponse(
+      references.input.value
+    );
+  }
+
+  function requiresFreeTyping(mode) {
+    return (
+      mode === "enrollment" &&
+      enrollmentRoundIndex === REQUIRED_ENROLLMENT_SAMPLES - 1
     );
   }
 
   function freeTypingResult(mode) {
+    if (!requiresFreeTyping(mode)) {
+      return {
+        complete: true,
+        characterCount: 0,
+        wordCount: 0,
+        remainingCharacters: 0,
+        remainingWords: 0,
+      };
+    }
     return global.OdysseusChallenge.evaluateFreeTyping(
       challengeReferences(mode).freeInput.value
     );
   }
 
   function challengeTasksComplete(mode) {
-    const round = challengeRound(mode);
     return (
       challengeTextResult(mode).accepted &&
-      freeTypingResult(mode).complete &&
-      trailProgress(mode) >= round.route.length
+      freeTypingResult(mode).complete
     );
   }
 
   function renderChallenge(mode) {
     const references = challengeReferences(mode);
     const round = challengeRound(mode);
-    const progress = trailProgress(mode);
     const comparison = challengeTextResult(mode);
     const freeTyping = freeTypingResult(mode);
     const available = challengeAvailable(mode);
-    const activeSlot = global.OdysseusChallenge.targetFor(round, progress);
-    const completedSlots = new Set(round.route.slice(0, progress));
+    const freeTypingRequired = requiresFreeTyping(mode);
 
     setText(references.mission, round.label);
-    setText(references.phrase, round.prompt);
+    setText(
+      references.phrase,
+      "Answer naturally. The words are processed locally and then cleared."
+    );
+    const promptCard = references.phrase.closest(".prompt-card");
+    if (promptCard) {
+      promptCard.hidden = true;
+    }
+    const freeTypingField = references.freeInput.closest(".field");
+    if (freeTypingField) {
+      freeTypingField.hidden = !freeTypingRequired;
+    }
+    const trail = references.board.closest(".signal-trail");
+    if (trail) {
+      trail.hidden = true;
+    }
+    references.board.hidden = true;
+    references.trailStatus.hidden = true;
     if (mode === "enrollment") {
       setText(
         elements.enrollmentRoundTag,
@@ -292,15 +603,14 @@
       );
     }
 
-    let textStatus = "Phrase waiting";
+    let textStatus = "Response waiting";
     if (comparison.accepted) {
-      textStatus = "Phrase accepted";
-    } else if (comparison.typedLength > 0 && comparison.prefixMatches) {
-      textStatus = `${comparison.remainingCharacters} characters left`;
+      textStatus = "Response ready";
     } else if (comparison.typedLength > 0) {
-      textStatus = comparison.needsCorrection
-        ? "Phrase needs a quick edit"
-        : "Keep typing";
+      textStatus =
+        comparison.remainingCharacters > 0
+          ? `${comparison.remainingCharacters} characters left`
+          : `${comparison.remainingWords} words left`;
     }
     setText(references.textStatus, textStatus);
     references.textStatus.dataset.complete = String(comparison.accepted);
@@ -309,9 +619,11 @@
       String(comparison.needsCorrection)
     );
 
-    let freeStatus = "Answer waiting";
-    if (freeTyping.complete) {
-      freeStatus = "Answer ready";
+    let freeStatus = freeTypingRequired
+      ? "Open response waiting"
+      : "Open response later";
+    if (freeTypingRequired && freeTyping.complete) {
+      freeStatus = "Open response ready";
     } else if (freeTyping.characterCount > 0) {
       freeStatus =
         freeTyping.remainingCharacters > 0
@@ -321,41 +633,18 @@
     setText(references.freeStatus, freeStatus);
     references.freeStatus.dataset.complete = String(freeTyping.complete);
 
-    const routeComplete = progress >= round.route.length;
-    setText(
-      references.trailStatus,
-      routeComplete
-        ? "Trail complete"
-        : `Trail ${progress} of ${round.route.length}`
-    );
-    references.trailStatus.dataset.complete = String(routeComplete);
-
     references.board.querySelectorAll(".signal-target").forEach((button) => {
-      const slot = Number(button.dataset.slot);
-      const active = slot === activeSlot;
-      const complete = completedSlots.has(slot);
-      button.dataset.active = String(active);
-      button.dataset.complete = String(complete);
-      button.disabled = !available || !active;
-      button.textContent = active ? String(progress + 1) : "";
-      button.setAttribute(
-        "aria-label",
-        active
-          ? `Signal target ${progress + 1} of ${round.route.length}`
-          : complete
-            ? "Completed signal target"
-            : "Inactive signal target"
-      );
-      if (active) {
-        button.setAttribute("aria-current", "step");
-      } else {
-        button.removeAttribute("aria-current");
-      }
+      button.disabled = true;
+      button.removeAttribute("aria-current");
     });
 
     references.input.disabled = !available;
-    references.input.readOnly = available && comparison.accepted;
-    references.freeInput.disabled = !available;
+    references.input.readOnly =
+      available &&
+      comparison.accepted &&
+      collector &&
+      collector.readiness().ready;
+    references.freeInput.disabled = !available || !freeTypingRequired;
     if (mode === "verification") {
       elements.resetVerification.disabled = !available;
     }
@@ -487,7 +776,12 @@
       rejectSyntheticChallengeInteraction(mode, input);
       return false;
     }
-    typingDiagnostics[mode].record(kind, input.value);
+    typingDiagnostics[mode].record(kind, input.value, {
+      inputType:
+        event && typeof event.inputType === "string"
+          ? event.inputType
+          : "",
+    });
     showSampleReadiness(mode);
     return true;
   }
@@ -579,6 +873,299 @@
       elements.metricPointer,
       String(Math.round(vector.pointerVelocityMean || 0))
     );
+  }
+
+  function updateAutomationAssessment(assessment) {
+    const value = assessment && typeof assessment === "object"
+      ? assessment
+      : null;
+    const classification = value?.classification || "insufficient_evidence";
+    const labels = {
+      automation_likely: "High risk",
+      elevated_review: "Review",
+      human_like_interaction: "Low risk",
+      insufficient_evidence: "Not assessed",
+    };
+    const explanations = {
+      automation_likely:
+        "The interaction contains multiple automation-like signals. Password or passkey review is required.",
+      elevated_review:
+        "Some signals merit review, but they do not establish that an agent produced the interaction.",
+      human_like_interaction:
+        "No strong automation pattern was found. This does not prove a human produced the interaction.",
+      insufficient_evidence:
+        "Identity similarity and automation risk are evaluated separately.",
+    };
+    setText(
+      elements.automationLevel,
+      labels[classification] || "Not assessed",
+    );
+    setText(
+      elements.automationExplanation,
+      explanations[classification] || explanations.insufficient_evidence,
+    );
+    if (elements.automationCard) {
+      elements.automationCard.dataset.level = value?.level || "unknown";
+    }
+  }
+
+  function interactionEvidence(sample) {
+    const boundedInteger = (value, maximum) =>
+      Math.max(
+        0,
+        Math.min(maximum, Math.round(Number(value) || 0))
+      );
+    const boundedScale = (value) => {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) && numeric >= 0.1
+        ? Math.min(10, numeric)
+        : 1;
+    };
+    const snapshot = sessionObserver ? sessionObserver.snapshot() : null;
+    const sessionInteraction = snapshot?.interaction;
+    const visualScaleMinimum = boundedScale(
+      snapshot?.zoom?.visualScaleMinimum
+    );
+    const visualScaleMaximum = Math.max(
+      visualScaleMinimum,
+      boundedScale(snapshot?.zoom?.visualScaleMaximum)
+    );
+    const pixelRatioMinimum = boundedScale(
+      snapshot?.zoom?.devicePixelRatioMinimum
+    );
+    const pixelRatioMaximum = Math.max(
+      pixelRatioMinimum,
+      boundedScale(snapshot?.zoom?.devicePixelRatioMaximum)
+    );
+    const elapsedMs = boundedInteger(
+      snapshot?.pageSession?.elapsedMs,
+      24 * 60 * 60 * 1_000
+    );
+    let remainingViewMs = elapsedMs;
+    const viewTiming = [];
+    if (Array.isArray(sessionInteraction?.viewTiming)) {
+      for (const entry of sessionInteraction.viewTiming.slice(0, 16)) {
+        const durationMs = Math.min(
+          remainingViewMs,
+          boundedInteger(entry.durationMs, 24 * 60 * 60 * 1_000)
+        );
+        viewTiming.push({
+          view: String(entry.view || "unknown"),
+          durationMs,
+        });
+        remainingViewMs -= durationMs;
+      }
+    }
+    const sessionAggregate = snapshot
+      ? {
+          elapsedMs,
+          keyboard: {
+            keyDownEvents:
+              boundedInteger(
+                sessionInteraction?.keyboard?.keyDownEvents,
+                200_000
+              ),
+            keyUpEvents:
+              boundedInteger(
+                sessionInteraction?.keyboard?.keyUpEvents,
+                200_000
+              ),
+            repeatedKeyEvents:
+              boundedInteger(
+                sessionInteraction?.keyboard?.repeatedKeyEvents,
+                200_000
+              ),
+            inputEvents:
+              boundedInteger(
+                sessionInteraction?.keyboard?.inputEvents,
+                200_000
+              ),
+            correctionEvents:
+              boundedInteger(
+                sessionInteraction?.keyboard?.correctionEvents,
+                200_000
+              ),
+            deletionEvents:
+              boundedInteger(
+                sessionInteraction?.keyboard?.deletionEvents,
+                200_000
+              ),
+            undoEvents:
+              boundedInteger(
+                sessionInteraction?.keyboard?.undoEvents,
+                200_000
+              ),
+          },
+          pointer: {
+            moveEvents:
+              boundedInteger(
+                sessionInteraction?.pointer?.moveEvents,
+                200_000
+              ),
+            distancePx:
+              boundedInteger(
+                sessionInteraction?.pointer?.distancePx,
+                1_000_000_000
+              ),
+            pointerDownEvents:
+              boundedInteger(
+                sessionInteraction?.pointer?.pointerDownEvents,
+                200_000
+              ),
+            pointerUpEvents:
+              boundedInteger(
+                sessionInteraction?.pointer?.pointerUpEvents,
+                200_000
+              ),
+            clickEvents:
+              boundedInteger(
+                sessionInteraction?.pointer?.clickEvents,
+                200_000
+              ),
+            doubleClickEvents:
+              boundedInteger(
+                sessionInteraction?.pointer?.doubleClickEvents,
+                200_000
+              ),
+            contextMenuEvents:
+              boundedInteger(
+                sessionInteraction?.pointer?.contextMenuEvents,
+                200_000
+              ),
+          },
+          scrolling: {
+            wheelEvents:
+              boundedInteger(
+                sessionInteraction?.scrolling?.wheelEvents,
+                200_000
+              ),
+            scrollEvents:
+              boundedInteger(
+                sessionInteraction?.scrolling?.scrollEvents,
+                200_000
+              ),
+            distancePx:
+              boundedInteger(
+                sessionInteraction?.scrolling?.distancePx,
+                1_000_000_000
+              ),
+          },
+          delays: {
+            sampleCount:
+              boundedInteger(
+                sessionInteraction?.delays?.sampleCount,
+                200_000
+              ),
+            averageMs:
+              boundedInteger(
+                sessionInteraction?.delays?.averageMs,
+                24 * 60 * 60 * 1_000
+              ),
+            deviationMs:
+              boundedInteger(
+                sessionInteraction?.delays?.deviationMs,
+                24 * 60 * 60 * 1_000
+              ),
+            longestMs:
+              boundedInteger(
+                sessionInteraction?.delays?.longestMs,
+                24 * 60 * 60 * 1_000
+              ),
+          },
+          zoom: {
+            changeEvents: boundedInteger(
+              snapshot.zoom?.changeEvents,
+              200_000
+            ),
+            visualScaleMinimum,
+            visualScaleMaximum,
+            devicePixelRatioMinimum: pixelRatioMinimum,
+            devicePixelRatioMaximum: pixelRatioMaximum,
+          },
+          viewTiming,
+        }
+      : undefined;
+    return {
+      version: 2,
+      trustedEventsRequired:
+        sample.integrity?.trustedEventsRequired === true,
+      rejectedSyntheticEvents:
+        boundedInteger(
+          sample.integrity?.rejectedSyntheticEvents,
+          1_000
+        ),
+      sampleCounts: {
+        dwell: boundedInteger(sample.counts?.dwell, 1_000),
+        flight: boundedInteger(sample.counts?.flight, 1_000),
+        downDown: boundedInteger(sample.counts?.downDown, 1_000),
+        pointer: boundedInteger(sample.counts?.pointer, 1_000),
+      },
+      durationMs: boundedInteger(sample.durationMs, 10 * 60 * 1_000),
+      sessionAggregate,
+    };
+  }
+
+  function boundedAuthSampleCounts(readiness) {
+    const counts = readiness?.counts || {};
+    const bounded = (value) =>
+      Math.max(0, Math.min(1_000, Math.round(Number(value) || 0)));
+    return {
+      dwell: bounded(counts.dwell),
+      flight: bounded(counts.flight),
+      downDown: bounded(counts.downDown),
+      pointer: bounded(counts.pointer),
+    };
+  }
+
+  function redactedInputShape(value) {
+    return Array.from(String(value || ""))
+      .slice(0, 128)
+      .map((character) => (/\s/.test(character) ? " " : "x"))
+      .join("");
+  }
+
+  function recordAuthInput(kind, event) {
+    if (
+      !authDiagnostics ||
+      !global.OdysseusTelemetry.isTrustedInteraction(event)
+    ) {
+      return;
+    }
+    authDiagnostics.record(
+      kind,
+      redactedInputShape(event.target.value),
+      {
+        inputType:
+          typeof event.inputType === "string" ? event.inputType : "",
+      }
+    );
+  }
+
+  function collectAuthBehaviorEvidence(username) {
+    const readiness = authCollector.readiness();
+    const sampleCounts = boundedAuthSampleCounts(readiness);
+    const diagnostics = authDiagnostics.summarize({
+      missionId: "steady-session",
+      keyPressCount: sampleCounts.dwell,
+    });
+    const sample = authCollector.finalize({ reset: true });
+    authDiagnostics.reset();
+
+    if (!sample.ok) {
+      return {
+        profileId: username,
+        status: "insufficient_evidence",
+        sampleCounts,
+      };
+    }
+    return {
+      profileId: username,
+      status: "ready",
+      sampleCounts,
+      vector: sample.vector,
+      diagnostics,
+      interactionEvidence: interactionEvidence(sample),
+    };
   }
 
   function updateEnrollmentProgress(count) {
@@ -750,7 +1337,11 @@
 
   function setWorkspaceControls() {
     const authenticated = isAuthenticated();
+    global.document.body.dataset.sessionMode = enrolled
+      ? "verification"
+      : "enrollment";
     elements.profileId.disabled = !authenticated;
+    elements.demoSubjectLabel.disabled = !authenticated;
     elements.resetProfile.disabled = !authenticated || !enrolled;
     elements.sensitiveAction.disabled = !authenticated || actionInFlight;
     elements.sensitiveAction.setAttribute(
@@ -763,10 +1354,22 @@
 
   function showAuthenticatedUser(user, message) {
     currentUser = user;
+    elements.behaviorAccessWarning.hidden = true;
+    elements.simulatedIpWarning.hidden = true;
+    elements.authPanel.hidden = false;
+    const recovery = global.document.getElementById("account-recovery-panel");
+    if (recovery) {
+      recovery.hidden = false;
+    }
     elements.authPanel.dataset.authenticated = "true";
     elements.authForm.hidden = true;
     elements.currentUserPanel.hidden = false;
     setText(elements.currentUser, user.username);
+    setText(elements.dashboardUser, user.username);
+    setText(
+      elements.dashboardAvatar,
+      Array.from(user.username)[0]?.toLocaleUpperCase() || "U"
+    );
     elements.profileId.value = String(user.profileId || user.username);
     elements.authPassword.value = "";
     setInlineStatus(
@@ -777,15 +1380,26 @@
     if (global.OdysseusAccount) {
       global.OdysseusAccount.setAuthenticatedUser(user);
     }
+    restartSessionObserver("unknown");
+    setAppView("session", "unknown");
     setWorkspaceControls();
   }
 
   function showSignedOut(message, state) {
     currentUser = null;
+    elements.behaviorAccessWarning.hidden = true;
+    elements.simulatedIpWarning.hidden = true;
+    elements.authPanel.hidden = false;
+    const recovery = global.document.getElementById("account-recovery-panel");
+    if (recovery) {
+      recovery.hidden = false;
+    }
     elements.authPanel.dataset.authenticated = "false";
     elements.authForm.hidden = false;
     elements.currentUserPanel.hidden = true;
     setText(elements.currentUser, "Not signed in");
+    setText(elements.dashboardUser, "Not signed in");
+    setText(elements.dashboardAvatar, "U");
     elements.profileId.value = "";
     elements.authPassword.value = "";
     elements.stepUpField.value = "";
@@ -799,7 +1413,15 @@
     if (global.OdysseusAccount) {
       global.OdysseusAccount.setAuthenticatedUser(null);
     }
+    restartSessionObserver("login");
+    setAppView("login", "login");
     resetLocalState();
+    if (authCollector) {
+      authCollector.reset();
+    }
+    if (authDiagnostics) {
+      authDiagnostics.reset();
+    }
     setWorkspaceControls();
   }
 
@@ -826,6 +1448,12 @@
         : "Sign in to restore your saved account setup.",
       "neutral"
     );
+    if (authCollector) {
+      authCollector.reset();
+    }
+    if (authDiagnostics) {
+      authDiagnostics.reset();
+    }
   }
 
   async function submitAuth() {
@@ -860,10 +1488,19 @@
     const turnstileToken =
       global.OdysseusAccount &&
       global.OdysseusAccount.getTurnstileToken();
+    const behaviorEvidence =
+      mode === "login"
+        ? collectAuthBehaviorEvidence(username)
+        : undefined;
+    if (mode === "register") {
+      authCollector.reset();
+      authDiagnostics.reset();
+    }
     const payload = JSON.stringify({
       username,
       password: credential,
       turnstileToken: turnstileToken || undefined,
+      behaviorEvidence,
     });
     elements.authPassword.value = "";
 
@@ -872,6 +1509,11 @@
         method: "POST",
         body: payload,
       });
+      const behaviorDecision = behaviorDecisionFrom(result);
+      if (!behaviorDecisionAllowsAccess(behaviorDecision)) {
+        showBehaviorWarning(behaviorDecision);
+        return;
+      }
       let user = authenticatedUserFrom(result);
       if (!user) {
         const session = await request("/api/auth/me", { method: "GET" });
@@ -884,7 +1526,7 @@
         user,
         mode === "register"
           ? `Account created. Signed in as ${user.username}.`
-          : `Signed in as ${user.username}.`
+          : authenticatedBehaviorMessage(user.username, behaviorDecision)
       );
       await hydrateProfile();
       if (isAuthenticated()) {
@@ -894,6 +1536,14 @@
         ).focus();
       }
     } catch (error) {
+      const behaviorDecision = behaviorDecisionFrom(error);
+      if (
+        String(error.code).toUpperCase() === "BEHAVIOR_LOGIN_DENIED" &&
+        behaviorDecision
+      ) {
+        showBehaviorWarning(behaviorDecision);
+        return;
+      }
       setInlineStatus(elements.authStatus, error.message, "error");
       elements.authPassword.focus();
     } finally {
@@ -974,8 +1624,6 @@
     renderChallenge(mode);
     const comparison = challengeTextResult(mode);
     const freeTyping = freeTypingResult(mode);
-    const round = challengeRound(mode);
-    const routeComplete = trailProgress(mode) >= round.route.length;
     const readiness = collector.readiness();
     const output =
       mode === "verification"
@@ -983,14 +1631,14 @@
         : elements.enrollmentStatus;
     if (!comparison.accepted) {
       cancelAutoSubmit(mode);
+      const remaining =
+        comparison.remainingCharacters > 0
+          ? `${comparison.remainingCharacters} more characters`
+          : `${comparison.remainingWords} more words`;
       setInlineStatus(
         output,
-        comparison.needsCorrection
-          ? "That phrase is a little too different. Make a quick edit and Odysseus will accept it automatically."
-          : "Finish the reading prompt. Capitalization, spacing, punctuation, and small typos are fine.",
-        comparison.needsCorrection
-          ? "error"
-          : "collecting"
+        `Answer naturally. Add ${remaining} and the question will continue automatically.`,
+        "collecting"
       );
       return;
     }
@@ -1002,18 +1650,7 @@
           : `${freeTyping.remainingWords} more words`;
       setInlineStatus(
         output,
-        `Guided phrase accepted automatically. Add ${remaining} in your own words.`,
-        "collecting"
-      );
-      return;
-    }
-    if (!routeComplete) {
-      cancelAutoSubmit(mode);
-      setInlineStatus(
-        output,
-        `Typing complete. Follow ${
-          round.route.length - trailProgress(mode)
-        } more signal targets.`,
+        `Response accepted automatically. Add ${remaining} in the final open response.`,
         "collecting"
       );
       return;
@@ -1021,7 +1658,7 @@
     if (readiness.ready) {
       setInlineStatus(
         output,
-        "All diagnostic tasks are ready. Recording automatically.",
+        "Response ready. Continuing automatically.",
         "working"
       );
       scheduleAutoSubmit(mode);
@@ -1030,7 +1667,7 @@
     cancelAutoSubmit(mode);
     setInlineStatus(
       output,
-      "Tasks complete. Keep answering or moving naturally while the check finishes.",
+      "Response ready. Keep using the page naturally while the check finishes.",
       "collecting"
     );
   }
@@ -1056,7 +1693,7 @@
     if (!challengeTasksComplete("enrollment")) {
       setInlineStatus(
         elements.enrollmentStatus,
-        "Finish the reading prompt, your answer, and the route before recording this round.",
+        "Finish this response before recording the question.",
         "error"
       );
       return;
@@ -1119,11 +1756,12 @@
       );
       setInlineStatus(
         elements.enrollmentStatus,
-        "Signal Trail enrollment complete.",
+        "Security question setup complete.",
         "ready"
       );
       setWorkspaceControls();
-      elements.verificationInput.focus();
+      setAppView("dashboard", "dashboard");
+      elements.dashboardOverview.focus();
       if (global.OdysseusAccount) {
         global.OdysseusAccount.pushNotification(
           "Saved setup ready",
@@ -1155,7 +1793,7 @@
       if (source === "explicit" && !enrolled) {
         setInlineStatus(
           elements.verificationStatus,
-          "Complete Signal Trail enrollment first.",
+          "Complete the account questions first.",
           "error"
         );
       }
@@ -1170,7 +1808,7 @@
       if (source === "explicit") {
         setInlineStatus(
           elements.verificationStatus,
-          "Finish the reading prompt, your answer, and the route before running the check.",
+          "Finish this response before running the check.",
           "error"
         );
       }
@@ -1206,6 +1844,7 @@
           profileId: id,
           vector: sample.vector,
           diagnostics: typingDiagnostic,
+          interactionEvidence: interactionEvidence(sample),
         }),
       });
       const rawTrust =
@@ -1217,6 +1856,7 @@
       );
 
       updateTrust(normalized, allowed, decision);
+      updateAutomationAssessment(result.automationAssessment);
       setText(
         elements.decisionReason,
         responseReason(result) || "The current session was compared with the saved setup."
@@ -1227,6 +1867,7 @@
         allowed ? "ready" : "error"
       );
       resetChallenge("verification", { advance: true });
+      setAppView("dashboard", "dashboard");
       if (global.OdysseusAccount) {
         global.OdysseusAccount.pushNotification(
           allowed ? "Session matched" : "Session review required",
@@ -1245,6 +1886,7 @@
             allowed,
             decision,
             distance: result.distance,
+            automationAssessment: result.automationAssessment || null,
           },
         })
       );
@@ -1255,7 +1897,7 @@
       if (!handleAuthenticatedError(error, elements.verificationStatus)) {
         setInlineStatus(
           elements.verificationStatus,
-          "Verification could not be completed.",
+          error.message || "Verification could not be completed.",
           "error"
         );
       }
@@ -1277,6 +1919,7 @@
     updateEnrollmentProgress(0);
     updateTrust(0, false, "Not evaluated");
     updateMetrics(null);
+    updateAutomationAssessment(null);
     resetAllChallenges();
     setText(
       elements.decisionReason,
@@ -1332,6 +1975,7 @@
       }
 
       if (result.notFound) {
+        setAppView("session", "enrollment");
         setInlineStatus(
           elements.enrollmentStatus,
           "No saved setup found. Ready for the first check-in.",
@@ -1341,6 +1985,7 @@
       }
 
       enrolled = true;
+      setAppView("session", "verification");
       updateEnrollmentProgress(
         result.sampleCount ?? REQUIRED_ENROLLMENT_SAMPLES
       );
@@ -1641,6 +2286,11 @@
       record.latestVerification &&
       typeof record.latestVerification === "object"
         ? record.latestVerification
+        : null;
+    const auditedSession =
+      latestVerification?.sessionAggregate &&
+      typeof latestVerification.sessionAggregate === "object"
+        ? latestVerification.sessionAggregate
         : null;
     const behaviorDiagnostics =
       latestVerification?.behaviorDiagnostics &&
@@ -2170,6 +2820,105 @@
         : [],
       (item) => item
     );
+    appendReportList(
+      elements.actionResult,
+      "Whole-session keyboard activity",
+      localSession?.interaction
+        ? [
+            {
+              primary: "Keyboard and input events",
+              secondary: `${localSession.interaction.keyboard.keyDownEvents} key-down events, ${localSession.interaction.keyboard.keyUpEvents} key-up events, and ${localSession.interaction.keyboard.inputEvents} input changes`,
+            },
+            {
+              primary: "Corrections and fixes",
+              secondary: `${localSession.interaction.keyboard.correctionEvents} correction patterns, ${localSession.interaction.keyboard.deletionEvents} deletions, ${localSession.interaction.keyboard.undoEvents} undo actions, and ${localSession.interaction.keyboard.repeatedKeyEvents} repeated-key events`,
+            },
+            {
+              primary: "Delay pattern",
+              secondary: `${localSession.interaction.delays.sampleCount} intervals averaging ${formatReportMetric(
+                localSession.interaction.delays.averageMs,
+                "ms"
+              )}, with ${formatReportMetric(
+                localSession.interaction.delays.deviationMs,
+                "ms"
+              )} variation and ${formatReportMetric(
+                localSession.interaction.delays.longestMs,
+                "ms"
+              )} longest`,
+            },
+          ]
+        : [],
+      (item) => item
+    );
+    appendReportList(
+      elements.actionResult,
+      "Whole-session pointer and scrolling",
+      localSession?.interaction
+        ? [
+            {
+              primary: "Pointer movement",
+              secondary: `${localSession.interaction.pointer.moveEvents} movement events across about ${localSession.interaction.pointer.distancePx} px, summarized without coordinates`,
+            },
+            {
+              primary: "Pointer actions",
+              secondary: `${localSession.interaction.pointer.clickEvents} clicks, ${localSession.interaction.pointer.doubleClickEvents} double-clicks, ${localSession.interaction.pointer.pointerDownEvents} presses, and ${localSession.interaction.pointer.contextMenuEvents} context-menu actions`,
+            },
+            {
+              primary: "Scrolling",
+              secondary: `${localSession.interaction.scrolling.scrollEvents} scroll events and ${localSession.interaction.scrolling.wheelEvents} wheel events across about ${localSession.interaction.scrolling.distancePx} px`,
+            },
+          ]
+        : [],
+      (item) => item
+    );
+    appendReportList(
+      elements.actionResult,
+      "Scale and zoom indicators",
+      localSession?.zoom
+        ? [
+            {
+              primary: "Observed scale changes",
+              secondary: `${localSession.zoom.changeEvents} changes, visual scale ${localSession.zoom.visualScaleMinimum ?? "Unavailable"} to ${localSession.zoom.visualScaleMaximum ?? "Unavailable"}`,
+            },
+            {
+              primary: "Device-pixel-ratio range",
+              secondary: `${localSession.zoom.devicePixelRatioMinimum ?? "Unavailable"} to ${localSession.zoom.devicePixelRatioMaximum ?? "Unavailable"}. ${localSession.zoom.interpretation}`,
+            },
+          ]
+        : [],
+      (item) => item
+    );
+    appendReportList(
+      elements.actionResult,
+      "Time by screen",
+      Array.isArray(localSession?.interaction?.viewTiming)
+        ? localSession.interaction.viewTiming
+        : [],
+      (entry) => ({
+        primary: readableReportLabel(entry.view),
+        secondary: formatReportMetric(entry.durationMs, "ms"),
+      })
+    );
+    appendReportList(
+      elements.actionResult,
+      "Latest account-linked interaction summary",
+      auditedSession
+        ? [
+            {
+              primary: "Stored verification window",
+              secondary: `${formatReportMetric(
+                auditedSession.elapsedMs,
+                "ms"
+              )}, ${auditedSession.keyboard?.keyDownEvents || 0} key-down events, ${auditedSession.keyboard?.correctionEvents || 0} corrections`,
+            },
+            {
+              primary: "Stored pointer and zoom totals",
+              secondary: `${auditedSession.pointer?.moveEvents || 0} pointer movements, ${auditedSession.pointer?.clickEvents || 0} clicks, and ${auditedSession.zoom?.changeEvents || 0} scale changes`,
+            },
+          ]
+        : [],
+      (item) => item
+    );
     appendReportNotes(
       elements.actionResult,
       "Browser-only detail boundary",
@@ -2389,9 +3138,25 @@
       enrollment: global.OdysseusDiagnostics.createTypingDiagnostic(),
       verification: global.OdysseusDiagnostics.createTypingDiagnostic(),
     };
+    authDiagnostics = global.OdysseusDiagnostics.createTypingDiagnostic();
+    authCollector = global.OdysseusTelemetry.createCollector({
+      keyboardTarget: global.document,
+      pointerTarget: elements.authPanel,
+      minimumDwellSamples: 10,
+      minimumFlightSamples: 8,
+      minimumDownDownSamples: 8,
+      minimumPointerSamples: 0,
+      shouldCaptureKeyboard(event) {
+        return (
+          event.target === elements.authUsername ||
+          event.target === elements.authPassword
+        );
+      },
+    });
     collector = global.OdysseusTelemetry.createCollector({
       keyboardTarget: global.document,
       pointerTarget: global.document,
+      minimumPointerSamples: 0,
       shouldCaptureKeyboard(event) {
         return (
           event.target === elements.enrollmentInput ||
@@ -2401,8 +3166,10 @@
         );
       },
     });
+    authCollector.start();
     collector.start();
     sessionObserver = global.OdysseusSession.createObserver(global);
+    setAppView("login", "login");
 
     elements.enrollmentForm.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -2412,8 +3179,35 @@
       event.preventDefault();
       submitAuth();
     });
+    elements.authUsername.addEventListener("input", (event) => {
+      recordAuthInput("guided", event);
+    });
+    elements.authPassword.addEventListener("input", (event) => {
+      recordAuthInput("free", event);
+    });
     elements.authMode.addEventListener("change", updateAuthMode);
+    elements.behaviorWarningRetry.addEventListener(
+      "click",
+      closeBehaviorWarning
+    );
     elements.logoutButton.addEventListener("click", logout);
+    global.document
+      .querySelectorAll("[data-app-view-target]")
+      .forEach((control) => {
+        control.addEventListener("click", () => {
+          navigateAppView(control.dataset.appViewTarget);
+        });
+      });
+    elements.dashboardTheme.addEventListener("click", () => {
+      const light = global.document.body.classList.toggle(
+        "dashboard-light-theme"
+      );
+      elements.dashboardTheme.setAttribute("aria-pressed", String(light));
+      setText(
+        elements.dashboardTheme,
+        light ? "Use dark theme" : "Use light theme"
+      );
+    });
     elements.verificationForm.addEventListener("submit", (event) => {
       event.preventDefault();
       showSampleReadiness("verification");
@@ -2533,6 +3327,11 @@
     if (collector) {
       collector.destroy();
     }
+    if (authCollector) {
+      authCollector.destroy();
+      authCollector = null;
+    }
+    authDiagnostics = null;
     if (sessionObserver) {
       sessionObserver.destroy();
       sessionObserver = null;

@@ -3,6 +3,8 @@
 
   const MIN_FREE_TYPING_CHARACTERS = 24;
   const MIN_FREE_TYPING_WORDS = 4;
+  const MIN_SHORT_RESPONSE_CHARACTERS = 12;
+  const MIN_SHORT_RESPONSE_WORDS = 2;
 
   const ENROLLMENT_ROUNDS = Object.freeze([
     Object.freeze({
@@ -204,6 +206,34 @@
     });
   }
 
+  function evaluateShortResponse(value) {
+    const normalized = String(value || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const characterCount = normalized.length;
+    const wordCount = normalized ? normalized.split(" ").length : 0;
+    return Object.freeze({
+      accepted:
+        characterCount >= MIN_SHORT_RESPONSE_CHARACTERS &&
+        wordCount >= MIN_SHORT_RESPONSE_WORDS,
+      exact: false,
+      prefixMatches: true,
+      matchingCharacters: characterCount,
+      typedLength: characterCount,
+      targetLength: MIN_SHORT_RESPONSE_CHARACTERS,
+      remainingCharacters: Math.max(
+        0,
+        MIN_SHORT_RESPONSE_CHARACTERS - characterCount
+      ),
+      remainingWords: Math.max(0, MIN_SHORT_RESPONSE_WORDS - wordCount),
+      hasExtraCharacters: false,
+      allowedMistakes: 0,
+      distance: 0,
+      similarity: 1,
+      needsCorrection: false,
+    });
+  }
+
   function targetFor(round, completedTargets) {
     if (!round || !Array.isArray(round.route)) {
       throw new TypeError("A valid challenge round is required.");
@@ -237,10 +267,13 @@
     ENROLLMENT_ROUNDS,
     MIN_FREE_TYPING_CHARACTERS,
     MIN_FREE_TYPING_WORDS,
+    MIN_SHORT_RESPONSE_CHARACTERS,
+    MIN_SHORT_RESPONSE_WORDS,
     VERIFICATION_ROUNDS,
     acceptTarget,
     compareText,
     evaluateFreeTyping,
+    evaluateShortResponse,
     roundAt,
     roundsFor,
     targetFor,

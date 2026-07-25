@@ -16,7 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
         e.preventDefault();
         
         const username = document.getElementById('username').value;
-        const password = document.getElementById('password').value;
+        const credentialValue = document.getElementById('password').value;
         const submitBtn = loginForm.querySelector('button[type="submit"]');
 
         // Add loading state
@@ -26,7 +26,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Simulate network request
         setTimeout(() => {
-            if (username === 'username' && password === 'password') {
+            if (
+                username.trim().length >= 3 &&
+                credentialValue.length >= 6
+            ) {
                 // Hide Step 1 and Show Step 2
                 step1.style.display = 'none';
                 step2.style.display = 'block';

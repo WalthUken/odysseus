@@ -85,6 +85,7 @@ module.exports = defineConfig({
       ODYSSEUS_DATABASE_PATH: path.join(runtimeDirectory, "odysseus.sqlite"),
       ODYSSEUS_MASTER_KEY: crypto.randomBytes(32).toString("base64"),
       ODYSSEUS_ALLOWED_ORIGINS: baseURL,
+      ODYSSEUS_DEMO_ADMIN_BYPASS: "adminbypass",
       ODYSSEUS_WEBAUTHN_ORIGINS: baseURL,
       ODYSSEUS_WEBAUTHN_RP_ID: "localhost",
       ODYSSEUS_EXPOSE_RECOVERY_TOKENS: "true",

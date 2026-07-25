@@ -21,12 +21,25 @@ const {
   registerAccountManagementRoutes,
 } = require("./src/account-management-routes");
 const {
+  isLoopbackRequest,
+  registerDemoAdminRoutes,
+} = require("./src/demo-admin-routes");
+const {
   ValidationError,
   createTemplate,
   evaluateVector,
   scaledManhattanDistance,
   validateProfileId,
 } = require("./src/behavior");
+const {
+  assessAutomationRisk,
+  validateInteractionEvidence,
+} = require("./src/automation-risk");
+const {
+  buildBehaviorDecision,
+  evaluateCompatibleEvidence,
+  reinforceTrustedSample,
+} = require("./src/behavior-lifecycle");
 const { sha256 } = require("./src/crypto");
 const {
   buildBehaviorDiagnostics,
@@ -401,6 +414,31 @@ function observedIp(request) {
   return value.startsWith("::ffff:") ? value.slice(7, 71) : value.slice(0, 64);
 }
 
+function credentialTargetKey(request) {
+  if (request.body?.username !== undefined) {
+    try {
+      const username = normalizeUsername(request.body.username);
+      return `account:${sha256(username).toString("hex")}`;
+    } catch (_error) {
+      return `invalid:${observedIp(request)}`;
+    }
+  }
+  return Number.isSafeInteger(request.auth?.user?.id)
+    ? `account-id:${request.auth.user.id}`
+    : `invalid:${observedIp(request)}`;
+}
+
+function validateDemoSubjectLabel(value) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  const allowed = new Set(["Human A", "Human B", "Automated agent"]);
+  if (typeof value !== "string" || !allowed.has(value)) {
+    throw new ValidationError("demoSubjectLabel is not recognized.");
+  }
+  return value;
+}
+
 function monitoringRoute(pathname) {
   if (pathname === "/api/health" || pathname === "/api/ready") {
     return "health";
@@ -513,6 +551,28 @@ async function createApp(options = {}) {
   );
   const metricsToken =
     options.metricsToken ?? environment.ODYSSEUS_METRICS_TOKEN ?? "";
+  const demoAdminBypass =
+    options.demoAdminBypass
+    ?? environment.ODYSSEUS_DEMO_ADMIN_BYPASS
+    ?? "";
+  if (demoAdminBypass && production) {
+    throw new Error(
+      "ODYSSEUS_DEMO_ADMIN_BYPASS is local-demo only and cannot be enabled in production.",
+    );
+  }
+  if (
+    demoAdminBypass
+    && (
+      typeof demoAdminBypass !== "string"
+      || demoAdminBypass.length < 10
+      || demoAdminBypass.length > 512
+      || /[\r\n]/.test(demoAdminBypass)
+    )
+  ) {
+    throw new Error(
+      "ODYSSEUS_DEMO_ADMIN_BYPASS must contain between 10 and 512 characters without line breaks.",
+    );
+  }
   const turnstileSiteKey =
     options.turnstileSiteKey
     ?? environment.ODYSSEUS_TURNSTILE_SITE_KEY
@@ -738,6 +798,66 @@ async function createApp(options = {}) {
       message: "Too many authentication attempts. Try again later.",
     },
     clock
+  );
+  async function recordCredentialLimit(reasonCode, observation) {
+    if (
+      observation.count !== observation.maximum + 1
+      && observation.count % 50 !== 0
+    ) {
+      return;
+    }
+    let user = null;
+    try {
+      const username = normalizeUsername(observation.request.body?.username);
+      user = await database.getUserByUsername(username);
+    } catch (_error) {
+      user = null;
+    }
+    await appendAudit({
+      userId: user?.id,
+      eventType: "auth.automation_flag",
+      outcome: "denied",
+      reasonCode,
+      metadata: {
+        classification: "likely_automated",
+        requestCount: observation.count,
+        requestMaximum: observation.maximum,
+        windowMs: observation.windowMs,
+        retryAfterSeconds: observation.resetSeconds,
+      },
+    }, observation.request);
+  }
+  const credentialBurstLimiter = createLimiter(
+    options.rateLimits && options.rateLimits.credentialBurst,
+    {
+      windowMs: 2_000,
+      maximum: 10,
+      store: providerRuntime.rateLimitStore,
+      keyGenerator: (request) => `credential-burst:${observedIp(request)}`,
+      message: "Too many authentication attempts. Try again later.",
+      onLimited: (observation) =>
+        recordCredentialLimit(
+          "CREDENTIAL_BURST_AUTOMATION",
+          observation,
+        ),
+    },
+    clock,
+  );
+  const credentialAccountLimiter = createLimiter(
+    options.rateLimits && options.rateLimits.credentialAccount,
+    {
+      windowMs: 15 * 60 * 1_000,
+      maximum: 10,
+      store: providerRuntime.rateLimitStore,
+      keyGenerator: credentialTargetKey,
+      message: "Too many authentication attempts. Try again later.",
+      onLimited: (observation) =>
+        recordCredentialLimit(
+          "ACCOUNT_PASSWORD_SPRAY",
+          observation,
+        ),
+    },
+    clock,
   );
   const verificationLimiter = createLimiter(
     options.rateLimits && options.rateLimits.verification,
@@ -1168,6 +1288,8 @@ async function createApp(options = {}) {
   app.post(
     "/api/auth/login",
     sameOrigin,
+    credentialBurstLimiter,
+    credentialAccountLimiter,
     authLimiter,
     requireCsrf,
     async (request, response) => {
@@ -1211,19 +1333,193 @@ async function createApp(options = {}) {
         );
       }
 
+      const profileList = await database.listProfiles(user.id);
+      let loginProfile = null;
+      let behaviorEvaluation = null;
+      let behaviorDecision;
+      let behaviorProfileId = null;
+      if (profileList.length === 0) {
+        behaviorDecision = buildBehaviorDecision({
+          template: null,
+          evidenceStatus: "baseline_missing",
+          amendment: {
+            status: "not_applied",
+            reasonCode: "BASELINE_NOT_ENROLLED",
+            previousSampleCount: null,
+            sampleCount: null,
+          },
+        });
+      } else {
+        let requestedProfileId = null;
+        let profileSelectionValid = true;
+        if (request.body.behaviorEvidence?.profileId !== undefined) {
+          try {
+            requestedProfileId = validateProfileId(
+              request.body.behaviorEvidence.profileId,
+            );
+          } catch (_error) {
+            profileSelectionValid = false;
+          }
+        }
+        const selectedMetadata = requestedProfileId
+          ? profileList.find(
+            (candidate) => candidate.profileId === requestedProfileId,
+          )
+          : profileList[0];
+        if (!selectedMetadata) {
+          profileSelectionValid = false;
+        }
+        const fallbackMetadata = selectedMetadata || profileList[0];
+        behaviorProfileId = fallbackMetadata.profileId;
+        loginProfile = await database.getProfile(
+          user.id,
+          behaviorProfileId,
+        );
+
+        if (!profileSelectionValid) {
+          behaviorDecision = buildBehaviorDecision({
+            template: loginProfile.template,
+            evidenceStatus: "invalid",
+            forcedReasonCodes: ["BEHAVIOR_PROFILE_NOT_AVAILABLE"],
+          });
+        } else if (!request.body.behaviorEvidence) {
+          behaviorDecision = buildBehaviorDecision({
+            template: loginProfile.template,
+            evidenceStatus: "missing",
+            forcedReasonCodes: ["BEHAVIOR_EVIDENCE_REQUIRED"],
+          });
+        } else {
+          try {
+            behaviorEvaluation = evaluateCompatibleEvidence(
+              loginProfile.template,
+              request.body.behaviorEvidence,
+            );
+            behaviorDecision = buildBehaviorDecision({
+              template: loginProfile.template,
+              evidenceStatus: behaviorEvaluation.status,
+              identitySimilarity:
+                behaviorEvaluation.identitySimilarity,
+              distance: behaviorEvaluation.distance,
+              comparedFeatureNames:
+                behaviorEvaluation.comparedFeatureNames,
+              ignoredFeatureNames:
+                behaviorEvaluation.ignoredFeatureNames,
+              automationRisk: behaviorEvaluation.automationRisk,
+              forcedReasonCodes: behaviorEvaluation.reasonCodes,
+            });
+          } catch (error) {
+            if (!(error instanceof ValidationError)) {
+              throw error;
+            }
+            behaviorDecision = buildBehaviorDecision({
+              template: loginProfile.template,
+              evidenceStatus: "invalid",
+              forcedReasonCodes: ["INVALID_BEHAVIOR_EVIDENCE"],
+            });
+          }
+        }
+      }
+
+      if (
+        behaviorDecision.decision === "allow"
+        && behaviorDecision.classification === "trusted_return"
+      ) {
+        const reinforced = reinforceTrustedSample(
+          loginProfile.template,
+          behaviorEvaluation.vector,
+          {
+            comparedFeatureNames:
+              behaviorEvaluation.comparedFeatureNames,
+            updatedAt: currentDate(clock).toISOString(),
+          },
+        );
+        behaviorDecision = {
+          ...behaviorDecision,
+          amendment: reinforced.amendment,
+        };
+        if (reinforced.amendment.status === "applied") {
+          await database.setProfile(
+            user.id,
+            behaviorProfileId,
+            reinforced.template,
+          );
+        }
+      }
+
+      if (behaviorDecision.decision !== "allow") {
+        await appendAudit({
+          userId: user.id,
+          eventType: "auth.login",
+          outcome: "denied",
+          reasonCode: behaviorDecision.reasonCodes[0],
+          metadata: {
+            behaviorProfileId,
+            behaviorDecision,
+            sampleCounts: behaviorEvaluation?.sampleCounts || null,
+          },
+        }, request);
+        if (behaviorDecision.simulatedIpRestriction.displayed) {
+          await appendAudit({
+            userId: user.id,
+            eventType: "account.behavior_flag",
+            outcome: "denied",
+            reasonCode: behaviorDecision.reasonCodes[0],
+            metadata: {
+              profileId: behaviorProfileId,
+              source: "credential_login",
+              behaviorDecision,
+            },
+          }, request);
+        }
+        response.status(403).json({
+          error: {
+            code: "BEHAVIOR_LOGIN_DENIED",
+            message: behaviorDecision.classification === "automation_likely"
+              ? "This login was blocked because the interaction appears automated."
+              : "This login requires additional identity review.",
+          },
+          behaviorDecision,
+        });
+        return;
+      }
+
       const credentials = await createAuthenticatedSession(
         user,
         response,
         { strongAuthentication: true },
       );
+      if (typeof credentialAccountLimiter.reset === "function") {
+        await credentialAccountLimiter.reset(credentialTargetKey(request));
+      }
       await appendAudit({
         userId: user.id,
         sessionId: credentials.session.id,
         eventType: "auth.login",
+        metadata: {
+          behaviorProfileId,
+          behaviorDecision,
+          sampleCounts: behaviorEvaluation?.sampleCounts || null,
+        },
       }, request);
+      if (behaviorDecision.amendment.status === "applied") {
+        await appendAudit({
+          userId: user.id,
+          sessionId: credentials.session.id,
+          eventType: "profile.reinforce",
+          reasonCode: behaviorDecision.amendment.reasonCode,
+          metadata: {
+            profileId: behaviorProfileId,
+            source: "trusted_return",
+            amendment: behaviorDecision.amendment,
+            identitySimilarity: behaviorDecision.identitySimilarity,
+            automationRisk: behaviorDecision.automationRisk,
+          },
+        }, request);
+      }
       response.json({
         user: publicUser(user),
         session: publicSession(credentials.session, currentDate(clock)),
+        behaviorDecision,
       });
     }
   );
@@ -1262,6 +1558,8 @@ async function createApp(options = {}) {
   app.post(
     "/api/auth/step-up",
     sameOrigin,
+    credentialBurstLimiter,
+    credentialAccountLimiter,
     authLimiter,
     requireCsrf,
     requireAuthentication,
@@ -1304,6 +1602,9 @@ async function createApp(options = {}) {
         sessionId: request.auth.session.id,
         eventType: "auth.step_up",
       }, request);
+      if (typeof credentialAccountLimiter.reset === "function") {
+        await credentialAccountLimiter.reset(credentialTargetKey(request));
+      }
       response.json({ stepUpUntil: stepUpUntil.toISOString() });
     }
   );
@@ -1367,6 +1668,19 @@ async function createApp(options = {}) {
     validatePassword,
     verificationLimiter,
   });
+  registerDemoAdminRoutes(app, {
+    HttpError,
+    adminBypassHash: sha256(demoAdminBypass || DUMMY_LOGIN_VALUE),
+    appendAudit,
+    credentialAccountLimiter,
+    credentialBurstLimiter,
+    database,
+    enabled: Boolean(demoAdminBypass),
+    normalizeUsername,
+    requireCsrf,
+    sameOrigin,
+    verifyToken,
+  });
 
   app.get(
     "/api/profiles",
@@ -1404,42 +1718,21 @@ async function createApp(options = {}) {
         request.auth.user.id,
         profileId
       );
-      if (request.device) {
-        const existingAssociations =
-          await database.listDeviceProfileAssociations(
-            request.auth.user.id,
-            {
-              deviceId: request.device.id,
-              profileId,
-            },
-          );
-        if (
-          existingAssociations.some(
-            (association) =>
-              association.relationship === "transferred",
-          )
-          && previous?.template?.transfer?.requiresRecalibration !== true
-        ) {
-          throw new HttpError(
-            409,
-            "TRANSFER_DESTINATION_PROFILE_REQUIRED",
-            "Recalibrate a transferred baseline under its distinct destination profile.",
-          );
-        }
+      if (
+        previous
+      ) {
+        throw new HttpError(
+          409,
+          "PROFILE_ALREADY_ENROLLED",
+          "This account already has a saved baseline. Verify against it or explicitly reset it before enrolling again."
+        );
       }
-      const template = (
-        previous?.template?.transfer?.requiresRecalibration === true
-          ? recalibrateCrossDeviceTemplate(
-            previous.template,
-            body.samples,
-            { recalibratedAt: currentDate(clock).toISOString() },
-          )
-          : createTemplate(body.samples)
-      );
+      const template = createTemplate(body.samples);
       const metadata = await database.setProfile(
         request.auth.user.id,
         profileId,
-        template
+        template,
+        { createOnly: true }
       );
       if (request.device) {
         await database.associateDeviceProfile(
@@ -1489,12 +1782,23 @@ async function createApp(options = {}) {
         body.diagnostics,
         VERIFICATION_ROUNDS
       );
+      const interactionEvidence = validateInteractionEvidence(
+        body.interactionEvidence,
+      );
+      const demoSubjectLabel = validateDemoSubjectLabel(
+        body.demoSubjectLabel,
+      );
       const diagnosticRound = typingDiagnostics
         ? VERIFICATION_ROUNDS.find(
             (round) => round.id === typingDiagnostics.missionId
           )
         : VERIFICATION_ROUNDS[0];
       const measuredResult = evaluateVector(body.vector, profile.template);
+      const automationAssessment = assessAutomationRisk(
+        body.vector,
+        typingDiagnostics,
+        interactionEvidence,
+      );
       const measuredDistance = scaledManhattanDistance(
         body.vector,
         profile.template,
@@ -1526,7 +1830,7 @@ async function createApp(options = {}) {
         templateState.state === "restricted"
         || transferredAssociation
       );
-      const result = transferRestricted
+      let result = transferRestricted
         ? {
           ...measuredResult,
           decision: "step_up",
@@ -1541,16 +1845,59 @@ async function createApp(options = {}) {
           },
         }
         : measuredResult;
+      if (automationAssessment.grantRestrictionRecommended) {
+        result = {
+          ...result,
+          decision: "deny",
+          reasonCodes: [
+            "AUTOMATION_LIKELY",
+            ...result.reasonCodes,
+          ],
+          policy: {
+            ...result.policy,
+            allowSensitiveActions: false,
+            stepUpRequired: true,
+          },
+        };
+      } else if (
+        automationAssessment.classification
+        !== "human_like_interaction"
+      ) {
+        result = {
+          ...result,
+          decision: result.decision === "deny" ? "deny" : "step_up",
+          reasonCodes: [
+            "AUTOMATION_EVIDENCE_REVIEW_REQUIRED",
+            ...result.reasonCodes,
+          ],
+          policy: {
+            ...result.policy,
+            allowSensitiveActions: false,
+            stepUpRequired: true,
+          },
+        };
+      }
       const behaviorDiagnostics = buildBehaviorDiagnostics(
         body.vector,
         profile.template,
         typingDiagnostics,
         diagnosticRound
       );
+      let behaviorDecision = buildBehaviorDecision({
+        template: profile.template,
+        evidenceStatus: "ready",
+        identitySimilarity: result,
+        distance: measuredDistance,
+        comparedFeatureNames: profile.template.featureKeys,
+        ignoredFeatureNames: [],
+        automationRisk: automationAssessment,
+        forcedReasonCodes: result.reasonCodes,
+      });
       let behaviorVerifiedUntil = null;
       const behaviorAllowed =
         result.decision === "allow"
-        && result.policy.allowSensitiveActions;
+        && result.policy.allowSensitiveActions
+        && behaviorDecision.decision === "allow";
 
       if (behaviorAllowed) {
         behaviorVerifiedUntil = new Date(
@@ -1588,15 +1935,19 @@ async function createApp(options = {}) {
         reasonCode: result.reasonCodes[0],
         metadata: {
           profileId,
+          demoSubjectLabel,
           decision: result.decision,
           trustPercent: result.trustPercent,
           normalizedDistance: result.normalizedDistance,
           acceptanceThreshold: profile.template.acceptanceThreshold,
           reasonCodes: result.reasonCodes,
           behaviorDiagnostics,
+          automationAssessment,
+          interactionEvidence,
           featureDeltas,
           transferRestricted,
           strongVerification,
+          behaviorDecision,
           ...(
             strongVerification
               ? {
@@ -1679,16 +2030,57 @@ async function createApp(options = {}) {
         }
       }
 
+      behaviorDecision = {
+        ...behaviorDecision,
+        amendment: driftUpdate.status === "updated"
+          ? {
+            status: "applied",
+            reasonCode: driftUpdate.reasonCode,
+            previousSampleCount: profile.template.sampleCount,
+            sampleCount:
+              profile.template.sampleCount
+              + driftUpdate.acceptedSessionIds.length,
+            acceptedSessionIds: driftUpdate.acceptedSessionIds,
+            rejectedSessions: driftUpdate.rejectedSessions,
+            meanShifts: driftUpdate.meanShifts,
+          }
+          : {
+            status: driftUpdate.status === "insufficient_evidence"
+              ? "pending"
+              : "not_applied",
+            reasonCode: driftUpdate.reasonCode,
+            previousSampleCount: profile.template.sampleCount,
+            sampleCount: profile.template.sampleCount,
+          },
+      };
+      if (behaviorDecision.decision !== "allow") {
+        await appendAudit({
+          userId: request.auth.user.id,
+          sessionId: request.auth.session.id,
+          eventType: "account.behavior_flag",
+          outcome: "denied",
+          reasonCode: behaviorDecision.reasonCodes[0],
+          metadata: {
+            profileId,
+            demoSubjectLabel,
+            behaviorDecision,
+          },
+        }, request);
+      }
+
       response.json({
         profileId,
+        demoSubjectLabel,
         evaluatedAt: currentDate(clock).toISOString(),
         behaviorVerifiedUntil:
           behaviorVerifiedUntil && behaviorVerifiedUntil.toISOString(),
         diagnostics: behaviorDiagnostics,
+        automationAssessment,
         templateAccess: {
           ...templateState,
           transferRestricted,
         },
+        behaviorDecision,
         driftUpdate,
         ...result,
       });
@@ -1828,6 +2220,16 @@ async function createApp(options = {}) {
         && typeof latestVerificationMetadata.behaviorDiagnostics === "object"
           ? latestVerificationMetadata.behaviorDiagnostics
           : null;
+      const latestAutomationAssessment =
+        latestVerificationMetadata.automationAssessment
+        && typeof latestVerificationMetadata.automationAssessment === "object"
+          ? latestVerificationMetadata.automationAssessment
+          : null;
+      const latestInteractionEvidence =
+        latestVerificationMetadata.interactionEvidence
+        && typeof latestVerificationMetadata.interactionEvidence === "object"
+          ? latestVerificationMetadata.interactionEvidence
+          : null;
       const currentIpAddress = observedIp(request);
       const profileSummaries = profiles.map((profile) => ({
         ...profile,
@@ -1896,6 +2298,11 @@ async function createApp(options = {}) {
               latestBehaviorDiagnostics?.keyboard?.averageKeyHoldMs ?? null,
             cadencePattern:
               latestBehaviorDiagnostics?.typing?.cadencePattern ?? null,
+            automationRiskLevel:
+              latestAutomationAssessment?.level ?? "unknown",
+            interactionClassification:
+              latestAutomationAssessment?.classification
+              ?? "insufficient_evidence",
           },
           account: {
             username: request.auth.user.username,
@@ -1932,6 +2339,8 @@ async function createApp(options = {}) {
             ? {
                 evaluatedAt: latestVerificationEvent.createdAt,
                 profileId: latestVerificationMetadata.profileId || null,
+                demoSubjectLabel:
+                  latestVerificationMetadata.demoSubjectLabel || null,
                 trustPercent:
                   Number.isFinite(latestVerificationMetadata.trustPercent)
                     ? latestVerificationMetadata.trustPercent
@@ -1948,6 +2357,9 @@ async function createApp(options = {}) {
                   : [],
                 ipAddress: latestVerificationMetadata.ipAddress || null,
                 behaviorDiagnostics: latestBehaviorDiagnostics,
+                automationAssessment: latestAutomationAssessment,
+                sessionAggregate:
+                  latestInteractionEvidence?.sessionAggregate || null,
                 grantActive: behaviorActive,
               }
             : null,
@@ -1994,6 +2406,17 @@ async function createApp(options = {}) {
               status: "Limited",
               detail:
                 "The browser rejects basic script-dispatched events, but no external proof-of-human or WebAuthn user-verification ceremony is configured.",
+            },
+            {
+              name: "Automation risk review",
+              status:
+                latestAutomationAssessment?.level === "high"
+                  ? "Review required"
+                  : latestAutomationAssessment
+                    ? "Observed"
+                    : "Insufficient evidence",
+              detail:
+                "Automation risk is reported separately from identity similarity and cannot prove that a person or agent produced the interaction.",
             },
           ],
           privacy: {
@@ -2096,6 +2519,30 @@ async function createApp(options = {}) {
       },
     );
   });
+
+  function serveLocalDemoAsset(filename) {
+    return (request, response) => {
+      response.set("Cache-Control", "no-store");
+      if (
+        production
+        || !demoAdminBypass
+        || !isLoopbackRequest(request)
+      ) {
+        response.status(404).type("text").send("Not found");
+        return;
+      }
+      response.sendFile(path.join(__dirname, "public", filename));
+    };
+  }
+
+  app.get(
+    ["/admin/test", "/admin-test", "/admin-test.html"],
+    serveLocalDemoAsset("admin-test.html"),
+  );
+  app.get(
+    "/admin-strong.js",
+    serveLocalDemoAsset("admin-strong.js"),
+  );
 
   app.use(express.static(path.join(__dirname, "public"), {
     extensions: ["html"],
