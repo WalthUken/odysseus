@@ -1,0 +1,26 @@
+{
+  "name": "odysseus-behavioral-auth-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Functional behavioral authentication MVP using Scaled Manhattan Distance.",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node --test --test-isolation=none"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "@fingerprintjs/fingerprintjs": "^5.2.0",
+    "@simplewebauthn/server": "^13.3.2",
+    "express": "^5.1.0",
+    "pg": "^8.22.0",
+    "redis": "^6.1.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.0"
+  }
+}
