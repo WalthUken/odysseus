@@ -277,7 +277,7 @@ function createRateLimiter(options = {}) {
     throw new TypeError("Rate limit store must expose increment.");
   }
 
-  function applyResult(result, now, response, next) {
+  function applyResult(result, now, request, response, next, key) {
     const bucket = normalizeStoreResult(result, now, windowMs);
     const remaining = Math.max(0, maximum - bucket.count);
     const resetSeconds = Math.max(
@@ -290,6 +290,25 @@ function createRateLimiter(options = {}) {
     response.set("RateLimit-Reset", String(resetSeconds));
 
     if (bucket.count > maximum) {
+      if (typeof options.onLimited === "function") {
+        try {
+          const observation = options.onLimited({
+            request,
+            response,
+            key,
+            count: bucket.count,
+            maximum,
+            resetAt: bucket.resetAt,
+            resetSeconds,
+            windowMs,
+          });
+          if (observation && typeof observation.catch === "function") {
+            observation.catch(() => {});
+          }
+        } catch (_error) {
+          // Abuse reporting must never weaken request limiting.
+        }
+      }
       response.set("Retry-After", String(resetSeconds));
       response.status(429).json({
         error: {
@@ -335,10 +354,12 @@ function createRateLimiter(options = {}) {
 
     if (value && typeof value.then === "function") {
       return value
-        .then((result) => applyResult(result, now, response, next))
+        .then((result) =>
+          applyResult(result, now, request, response, next, key)
+        )
         .catch((error) => handleStoreError(error, response, next));
     }
-    applyResult(value, now, response, next);
+    applyResult(value, now, request, response, next, key);
   }
 
   middleware.reset = (key) => {

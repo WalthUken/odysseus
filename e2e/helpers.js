@@ -7,10 +7,13 @@ const TEST_PASSWORD = "abc123";
 const EXPECTED_RESOURCE_ERRORS = new Map([
   [401, ["/api/auth/me"]],
   [403, ["/api/admin/summary"]],
+  [409, ["/api/explanations"]],
   [
     404,
     [
+      "/admin/test",
       "/api/security/summary",
+      "/api/explanations",
       /^\/api\/profiles\/[^/]+$/,
     ],
   ],
@@ -88,8 +91,35 @@ async function registerAccount(page, testInfo, prefix) {
   return username;
 }
 
+async function completeMockQuestionnaire(page, prefix) {
+  const response = page.locator("#enrollment-input");
+  const answerPrefix = prefix || "normal account response";
+
+  for (let round = 1; round <= 4; round += 1) {
+    await response.pressSequentially(`${answerPrefix} number ${round}`, {
+      delay: 4,
+    });
+    await expect(page.locator("#enrollment-round-tag")).toHaveText(
+      `Round ${round + 1} of 5`
+    );
+  }
+
+  await response.pressSequentially(`${answerPrefix} final answer`, {
+    delay: 4,
+  });
+  const freeResponse = page.locator("#enrollment-free-input");
+  await expect(freeResponse).toBeVisible();
+  await freeResponse.pressSequentially(
+    "review positions and check market activity",
+    { delay: 4 }
+  );
+
+  await expect(page.locator("#dashboard-overview")).toBeVisible();
+}
+
 module.exports = {
   TEST_PASSWORD,
+  completeMockQuestionnaire,
   isExpectedResourceError,
   observePageFailures,
   openOdysseus,

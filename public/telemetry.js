@@ -223,7 +223,6 @@
       if (
         !this.acceptsInteraction(event) ||
         event.repeat ||
-        event.isComposing ||
         (typeof this.options.shouldCaptureKeyboard === "function" &&
           !this.options.shouldCaptureKeyboard(event))
       ) {
@@ -257,7 +256,6 @@
     handleKeyUp(event) {
       if (
         !this.acceptsInteraction(event) ||
-        event.isComposing ||
         (typeof this.options.shouldCaptureKeyboard === "function" &&
           !this.options.shouldCaptureKeyboard(event))
       ) {

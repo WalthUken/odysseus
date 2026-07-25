@@ -552,7 +552,7 @@ test("supports account registration, behavior grants, password step-up, audit, a
   assert.equal(
     behaviorAuthorized.body.record.latestVerification
       .behaviorDiagnostics.slowWords.guided[0].label,
-    "trusted",
+    "Response word 2",
   );
   assert.match(
     behaviorAuthorized.body.record.network.currentIpAddress,
@@ -882,6 +882,42 @@ test("isolates behavior profiles between authenticated accounts", async (context
   assert.equal(secondProfiles.body.profiles.length, 1);
 });
 
+test("does not overwrite an existing baseline through enrollment", async (context) => {
+  const { client } = await startTestServer(context);
+  await bootstrapAndRegister(client, "baseline-preservation");
+
+  const first = await client.request("/api/enroll", {
+    method: "POST",
+    body: {
+      profileId: "primary-baseline",
+      samples: enrollmentSamples,
+    },
+  });
+  assert.equal(first.response.status, 201);
+
+  const replacement = await client.request("/api/enroll", {
+    method: "POST",
+    body: {
+      profileId: "primary-baseline",
+      samples: enrollmentSamples.map((sample) => ({
+        dwellMean: sample.dwellMean + 400,
+        flightMean: sample.flightMean + 400,
+      })),
+    },
+  });
+  assert.equal(replacement.response.status, 409);
+  assert.equal(
+    replacement.body.error.code,
+    "PROFILE_ALREADY_ENROLLED"
+  );
+
+  const stored = await client.request(
+    "/api/profiles/primary-baseline"
+  );
+  assert.equal(stored.response.status, 200);
+  assert.equal(stored.body.sampleCount, enrollmentSamples.length);
+});
+
 test("returns structured validation errors without leaking internals", async (context) => {
   const { client } = await startTestServer(context);
   await client.request("/api/auth/me");
@@ -915,4 +951,215 @@ test("returns structured validation errors without leaking internals", async (co
   );
   assert.equal(invalidAuditCursor.response.status, 400);
   assert.match(invalidAuditCursor.body.error.code, /VALIDATION/);
+});
+
+test("serves and strengthens a local account fingerprint report", async (context) => {
+  const { client } = await startTestServer(context, {
+    demoAdminBypass: "adminbypass",
+  });
+  await client.request("/api/auth/me");
+  const registration = await client.request("/api/auth/register", {
+    method: "POST",
+    body: {
+      username: "human-a-demo",
+      password: "test06",
+    },
+  });
+  assert.equal(registration.response.status, 201);
+
+  const enrollment = await client.request("/api/enroll", {
+    method: "POST",
+    body: {
+      profileId: "human-a-report",
+      samples: enrollmentSamples,
+    },
+  });
+  assert.equal(enrollment.response.status, 201);
+
+  const verification = await client.request("/api/verify", {
+    method: "POST",
+    body: {
+      profileId: "human-a-report",
+      vector: { dwellMean: 101, flightMean: 75 },
+      diagnostics: verificationDiagnostics(),
+      interactionEvidence: {
+        version: 1,
+        trustedEventsRequired: true,
+        rejectedSyntheticEvents: 0,
+        sampleCounts: {
+          dwell: 50,
+          flight: 48,
+          downDown: 48,
+          pointer: 20,
+        },
+        durationMs: 5_200,
+      },
+      demoSubjectLabel: "Human A",
+    },
+  });
+  assert.equal(verification.response.status, 200);
+  assert.equal(
+    verification.body.automationAssessment.classification,
+    "human_like_interaction",
+  );
+
+  const page = await client.request("/admin");
+  assert.equal(page.response.status, 200);
+  assert.match(page.body, /Local Report Viewer/);
+  const testPage = await client.request("/admin/test");
+  assert.equal(testPage.response.status, 200);
+  assert.match(testPage.body, /Stronger Local Test/);
+
+  const wrongCode = await client.request("/api/demo-admin/report", {
+    method: "POST",
+    body: {
+      username: "human-a-demo",
+      adminBypass: "wrong-admin-code",
+    },
+  });
+  assert.equal(wrongCode.response.status, 401);
+
+  const opened = await client.request("/api/demo-admin/report", {
+    method: "POST",
+    body: {
+      username: "human-a-demo",
+      adminBypass: "adminbypass",
+    },
+  });
+  assert.equal(opened.response.status, 200);
+  assert.equal(opened.body.report.account.username, "human-a-demo");
+  assert.equal(opened.body.report.fingerprints.length, 1);
+  assert.equal(
+    opened.body.report.fingerprints[0].reportLabel,
+    "Report 1",
+  );
+  assert.equal(
+    opened.body.report.fingerprints[0].features[0].baselineCenter,
+    101.2,
+  );
+  assert.equal(
+    opened.body.report.comparisons[0].claimedSubject,
+    "Human A",
+  );
+  assert.equal(
+    opened.body.report.comparisons[0].identitySimilarity.decision,
+    "allow",
+  );
+  assert.doesNotMatch(
+    JSON.stringify(opened.body),
+    /test06|adminbypass|passwordHash|template_ciphertext/,
+  );
+  assert.equal(
+    opened.response.headers.get("cache-control"),
+    "no-store",
+  );
+
+  const strongTest = await client.request("/api/demo-admin/test", {
+    method: "POST",
+    body: {
+      username: "human-a-demo",
+      adminBypass: "adminbypass",
+      profileId: "human-a-report",
+      demoSubjectLabel: "Human A",
+      samples: [
+        { dwellMean: 100, flightMean: 75 },
+        { dwellMean: 101, flightMean: 76 },
+        { dwellMean: 102, flightMean: 74 },
+      ].map((vector) => ({
+        vector,
+        diagnostics: verificationDiagnostics(),
+        interactionEvidence: {
+          version: 1,
+          trustedEventsRequired: true,
+          rejectedSyntheticEvents: 0,
+          sampleCounts: {
+            dwell: 50,
+            flight: 48,
+            downDown: 48,
+            pointer: 20,
+          },
+          durationMs: 5_200,
+        },
+      })),
+    },
+  });
+  assert.equal(strongTest.response.status, 201);
+  assert.match(strongTest.body.report.id, /^ODY-STRONG-\d+$/);
+  assert.equal(strongTest.body.report.sampleCount, 3);
+  assert.equal(
+    strongTest.body.report.identitySimilarity.classification,
+    "close_to_baseline",
+  );
+  assert.equal(
+    strongTest.body.report.automationRisk.classification,
+    "human_like_interaction",
+  );
+  assert.equal(
+    strongTest.response.headers.get("cache-control"),
+    "no-store",
+  );
+
+  const reopened = await client.request("/api/demo-admin/report", {
+    method: "POST",
+    body: {
+      username: "human-a-demo",
+      adminBypass: "adminbypass",
+    },
+  });
+  assert.equal(reopened.response.status, 200);
+  assert.equal(reopened.body.report.strongTests.length, 1);
+  assert.equal(
+    reopened.body.report.strongTests[0].subjectLabel,
+    "Human A",
+  );
+});
+
+test("flags and blocks credential bursts before one hundred attempts", async (context) => {
+  const { app, client } = await startTestServer(context, {
+    rateLimits: {
+      auth: {
+        maximum: 100,
+        windowMs: 60_000,
+      },
+      credentialAccount: {
+        maximum: 100,
+        windowMs: 60_000,
+      },
+      credentialBurst: {
+        maximum: 5,
+        windowMs: 60_000,
+      },
+    },
+  });
+  const registration = await bootstrapAndRegister(
+    client,
+    "credential-burst-user",
+  );
+
+  const attempts = [];
+  for (let index = 0; index < 6; index += 1) {
+    attempts.push(await client.request("/api/auth/login", {
+      method: "POST",
+      body: {
+        username: "credential-burst-user",
+        password: INVALID_FIXTURE,
+      },
+    }));
+  }
+
+  assert.equal(attempts[4].response.status, 401);
+  assert.equal(attempts[5].response.status, 429);
+  assert.equal(attempts[5].body.error.code, "RATE_LIMITED");
+
+  await new Promise((resolve) => setImmediate(resolve));
+  const audit = await app.locals.database.listAudit({
+    userId: registration.body.user.id,
+    limit: 100,
+  });
+  const flag = audit.find(
+    (event) => event.eventType === "auth.automation_flag",
+  );
+  assert.equal(flag.reasonCode, "CREDENTIAL_BURST_AUTOMATION");
+  assert.equal(flag.metadata.classification, "likely_automated");
+  assert.equal(flag.metadata.requestCount, 6);
 });

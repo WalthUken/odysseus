@@ -11,6 +11,7 @@ const {
   acceptTarget,
   compareText,
   evaluateFreeTyping,
+  evaluateShortResponse,
   roundAt,
   targetFor,
 } = require("../public/challenge");
@@ -83,6 +84,17 @@ test("accepts a short free-typing response without inspecting its meaning", () =
   assert.equal(complete.complete, true);
   assert.ok(complete.characterCount >= MIN_FREE_TYPING_CHARACTERS);
   assert.ok(complete.wordCount >= MIN_FREE_TYPING_WORDS);
+});
+
+test("accepts an arbitrary short account response without matching text", () => {
+  const partial = evaluateShortResponse("my note");
+  assert.equal(partial.accepted, false);
+  assert.ok(partial.remainingCharacters > 0);
+
+  const accepted = evaluateShortResponse("review market positions");
+  assert.equal(accepted.accepted, true);
+  assert.equal(accepted.exact, false);
+  assert.equal(accepted.needsCorrection, false);
 });
 
 test("advances a pointer trail only when the active target is selected", () => {

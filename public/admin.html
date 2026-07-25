@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="Local Odysseus behavioral report viewer."
+    >
+    <title>Odysseus | Local Report Viewer</title>
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/admin.css">
+    <script src="/admin.js" defer></script>
+  </head>
+  <body class="admin-page">
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Return to Odysseus">
+        <span class="brand-mark" aria-hidden="true">
+          <span></span>
+        </span>
+        <span class="brand-copy">
+          <strong>Odysseus</strong>
+          <small>Local report viewer</small>
+        </span>
+      </a>
+      <nav class="admin-header-actions" aria-label="Admin demo pages">
+        <a class="button button-quiet" href="/admin/test">
+          Stronger fingerprint test
+        </a>
+        <a class="button button-quiet" href="/">Account console</a>
+      </nav>
+    </header>
+
+    <main id="admin-main">
+      <section class="admin-hero" aria-labelledby="admin-title">
+        <p class="panel-kicker">Local demo only</p>
+        <h1 id="admin-title">Inspect one account fingerprint</h1>
+        <p>
+          Enter the account name and the separate local admin access code.
+          The saved report shows identity similarity, automation risk,
+          decision reasons, contributing features, sample totals, and
+          fingerprint update history. This viewer does not create an admin
+          session.
+        </p>
+      </section>
+
+      <section class="admin-access-panel" aria-labelledby="admin-access-title">
+        <div>
+          <p class="panel-kicker">Local report access</p>
+          <h2 id="admin-access-title">Open an account report</h2>
+          <p>
+            The admin code is the local gate for reports already saved under
+            the selected account name. Failed attempts are limited and audited.
+          </p>
+        </div>
+        <form id="admin-report-form" class="admin-report-form">
+          <div class="field">
+            <label for="admin-username">Account username</label>
+            <input
+              id="admin-username"
+              name="username"
+              type="text"
+              minlength="3"
+              maxlength="64"
+              autocomplete="username"
+              required
+            >
+          </div>
+          <div class="field">
+            <label for="admin-bypass">Admin access code</label>
+            <input
+              id="admin-bypass"
+              name="adminBypass"
+              type="password"
+              minlength="10"
+              maxlength="512"
+              autocomplete="off"
+              required
+            >
+          </div>
+          <button
+            class="button button-primary"
+            id="admin-report-submit"
+            type="submit"
+          >
+            Prepare account report
+          </button>
+          <p
+            class="compact-status"
+            id="admin-report-status"
+            role="status"
+            aria-live="polite"
+          ></p>
+        </form>
+      </section>
+
+      <section
+        class="admin-report"
+        id="admin-report"
+        aria-labelledby="admin-report-title"
+        hidden
+      >
+        <div class="admin-report-heading">
+          <div>
+            <p class="panel-kicker">Sensitive local demo data</p>
+            <h2 id="admin-report-title">Account fingerprint report</h2>
+          </div>
+          <span id="admin-report-generated"></span>
+        </div>
+        <div id="admin-report-content"></div>
+      </section>
+    </main>
+  </body>
+</html>

@@ -1003,7 +1003,7 @@ class OdysseusDatabase {
     return affectedRows(result);
   }
 
-  async setProfile(userId, profileId, template) {
+  async setProfile(userId, profileId, template, options = {}) {
     this.ensureInitialized();
     positiveInteger(userId, "userId");
     const normalizedProfileId = validateProfileId(profileId);
@@ -1022,8 +1022,22 @@ class OdysseusDatabase {
       ? template.featureKeys.length
       : 0;
 
-    this.database
-      .prepare(`
+    const conflictClause = options.createOnly === true
+      ? ""
+      : `
+        ON CONFLICT(user_id, profile_id) DO UPDATE SET
+          template_ciphertext = excluded.template_ciphertext,
+          template_iv = excluded.template_iv,
+          template_auth_tag = excluded.template_auth_tag,
+          template_version = excluded.template_version,
+          sample_count = excluded.sample_count,
+          feature_count = excluded.feature_count,
+          enrolled_at = excluded.enrolled_at,
+          updated_at = excluded.updated_at
+      `;
+    try {
+      this.database
+        .prepare(`
         INSERT INTO behavior_profiles(
           user_id,
           profile_id,
@@ -1036,28 +1050,32 @@ class OdysseusDatabase {
           enrolled_at,
           updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(user_id, profile_id) DO UPDATE SET
-          template_ciphertext = excluded.template_ciphertext,
-          template_iv = excluded.template_iv,
-          template_auth_tag = excluded.template_auth_tag,
-          template_version = excluded.template_version,
-          sample_count = excluded.sample_count,
-          feature_count = excluded.feature_count,
-          enrolled_at = excluded.enrolled_at,
-          updated_at = excluded.updated_at
+        ${conflictClause}
       `)
-      .run(
-        userId,
-        normalizedProfileId,
-        encrypted.ciphertext,
-        encrypted.iv,
-        encrypted.authTag,
-        templateVersion,
-        sampleCount,
-        featureCount,
-        enrolledAt,
-        now,
-      );
+        .run(
+          userId,
+          normalizedProfileId,
+          encrypted.ciphertext,
+          encrypted.iv,
+          encrypted.authTag,
+          templateVersion,
+          sampleCount,
+          featureCount,
+          enrolledAt,
+          now,
+        );
+    } catch (error) {
+      if (
+        options.createOnly === true &&
+        String(error && error.code).startsWith("SQLITE_CONSTRAINT")
+      ) {
+        throw new DatabaseConflictError(
+          "Behavior profile is already enrolled.",
+          error
+        );
+      }
+      throw error;
+    }
 
     const row = this.database
       .prepare(`
