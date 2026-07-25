@@ -4,8 +4,10 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
+  GEMINI_API_ROOT,
   createGeminiExplanationAdapter,
   validateBehaviorReport,
+  validateExplanation,
 } = require("../src/gemini-explanation");
 const {
   createHuggingFaceAnomalyAdapter,
@@ -41,6 +43,30 @@ function behaviorReport() {
         deviationRatio: 2.1,
       },
     ],
+  };
+}
+
+function interactionResponse(explanation) {
+  return {
+    id: "interaction-1",
+    object: "interaction",
+    status: "completed",
+    steps: [
+      {
+        type: "model_output",
+        content: [{ type: "text", text: JSON.stringify(explanation) }],
+      },
+    ],
+  };
+}
+
+function goodExplanation(overrides = {}) {
+  return {
+    headline: "Interaction changed",
+    summary: "Several timing signals differ from baseline.",
+    observations: ["Key hold duration increased."],
+    nextStep: "Use Odysseus's configured verification flow.",
+    ...overrides,
   };
 }
 
@@ -142,24 +168,7 @@ test("generates strictly labeled Gemini prose without authorization", async () =
     model: "gemini-test",
     fetchImpl: async (url, options) => {
       request = { url, options };
-      return jsonResponse({
-        steps: [
-          {
-            type: "model_output",
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify({
-                  headline: "Interaction changed",
-                  summary: "Several timing signals differ from baseline.",
-                  observations: ["Key hold duration increased."],
-                  nextStep: "Use Odysseus's configured verification flow.",
-                }),
-              },
-            ],
-          },
-        ],
-      });
+      return jsonResponse(interactionResponse(goodExplanation()));
     },
   });
   const result = await adapter.explain(behaviorReport());
@@ -168,15 +177,104 @@ test("generates strictly labeled Gemini prose without authorization", async () =
   assert.equal(result.authorizationDecision, null);
   assert.match(result.prose, /^AI-generated explanation:/);
   assert.match(result.prose, /Authority: Advisory only/);
+
+  // Documented Interactions API endpoint, with the key in the header only.
+  assert.equal(
+    GEMINI_API_ROOT,
+    "https://generativelanguage.googleapis.com/v1beta/interactions"
+  );
+  assert.equal(request.url, GEMINI_API_ROOT);
   assert.doesNotMatch(request.url, /test-gemini-key/);
+  assert.doesNotMatch(request.url, /[?&]key=/);
+  assert.equal(request.options.method ?? "POST", "POST");
   assert.equal(request.options.headers["x-goog-api-key"], "test-gemini-key");
+  assert.equal(
+    request.options.headers["Content-Type"],
+    "application/json"
+  );
+
   const sent = JSON.parse(request.options.body);
   assert.equal(sent.model, "gemini-test");
   assert.equal(sent.store, false);
   assert.equal(sent.background, false);
+  assert.equal(typeof sent.system_instruction, "string");
+  assert.match(sent.system_instruction, /do not make.*authorization/i);
+  assert.equal(typeof sent.input, "string");
+  assert.equal(sent.response_format.type, "text");
   assert.equal(sent.response_format.mime_type, "application/json");
+  assert.equal(sent.response_format.schema.type, "object");
   assert.equal(sent.response_format.schema.additionalProperties, false);
+  assert.equal("$schema" in sent.response_format.schema, false);
+  assert.deepEqual(sent.response_format.schema.required, [
+    "headline",
+    "summary",
+    "observations",
+    "nextStep",
+  ]);
+  assert.equal(sent.generation_config.max_output_tokens, 600);
   assert.equal("temperature" in sent.generation_config, false);
+  // No tools, grounding, streaming, or conversation state.
+  assert.equal("tools" in sent, false);
+  assert.equal("previous_interaction_id" in sent, false);
+
+  // The outbound payload stays quantised and identifier-free.
+  const forwarded = JSON.parse(sent.input);
+  assert.deepEqual(Object.keys(forwarded), [
+    "version",
+    "assessment",
+    "signals",
+  ]);
+  assert.doesNotMatch(sent.input, /userId|sessionId|rawTypedText/);
+});
+
+test("reads the model text from the Interactions step timeline", async () => {
+  const adapter = createGeminiExplanationAdapter({
+    apiKey: "test-gemini-key",
+    fetchImpl: async () =>
+      jsonResponse({
+        id: "interaction-2",
+        object: "interaction",
+        status: "completed",
+        steps: [
+          { type: "user_input", content: [{ type: "text", text: "ignored" }] },
+          {
+            type: "model_output",
+            content: [
+              { type: "text", text: JSON.stringify(goodExplanation()) },
+            ],
+          },
+        ],
+      }),
+  });
+  const result = await adapter.explain(behaviorReport());
+  assert.equal(result.generated, true);
+  assert.equal(result.explanation.headline, "Interaction changed");
+  assert.equal(result.authorizationDecision, null);
+});
+
+test("treats blocked or empty Gemini output as a clean provider failure", async () => {
+  const payloads = [
+    { status: "failed", steps: [] },
+    { status: "cancelled", steps: [] },
+    { promptFeedback: { blockReason: "SAFETY" }, steps: [] },
+    { status: "completed", steps: [] },
+    { status: "completed" },
+    { status: "completed", steps: [{ type: "function_call", content: [] }] },
+  ];
+  for (const payload of payloads) {
+    const adapter = createGeminiExplanationAdapter({
+      apiKey: "test-gemini-key",
+      fetchImpl: async () => jsonResponse(payload),
+    });
+    const result = await adapter.explain(behaviorReport());
+    assert.equal(result.generated, false, JSON.stringify(payload));
+    assert.equal(result.available, true);
+    assert.equal(result.code, "GEMINI_INVALID_RESPONSE");
+    assert.equal(result.retryable, false);
+    assert.equal(result.advisoryOnly, true);
+    assert.equal(result.authorizationDecision, null);
+    assert.equal(adapter.readiness().ready, false);
+  }
 });
 
 test("rejects unstructured Gemini reports before transport", async () => {
@@ -209,30 +307,99 @@ test("rejects Gemini prose that attempts to authorize access", async () => {
   const adapter = createGeminiExplanationAdapter({
     apiKey: "test-gemini-key",
     fetchImpl: async () =>
-      jsonResponse({
-        steps: [
-          {
-            type: "model_output",
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify({
-                  headline: "Access is allowed",
-                  summary: "The model attempted to decide access.",
-                  observations: ["Timing changed."],
-                  nextStep: "Continue.",
-                }),
-              },
-            ],
-          },
-        ],
-      }),
+      jsonResponse(
+        interactionResponse({
+          // Reversed word order used to slip past the filter entirely.
+          headline: "Access granted",
+          summary: "The model attempted to decide access.",
+          observations: ["Timing changed."],
+          nextStep: "Continue.",
+        })
+      ),
   });
   const result = await adapter.explain(behaviorReport());
   assert.equal(result.generated, false);
   assert.equal(result.available, true);
   assert.equal(result.code, "GEMINI_INVALID_RESPONSE");
   assert.equal(result.authorizationDecision, null);
+});
+
+test("blocks authorization language in either word order", () => {
+  const blocked = [
+    // Verb first.
+    "Grant access to the protected action.",
+    "Granted access after review.",
+    "Allow access to the account.",
+    "Deny access to the account.",
+    "Approve access for the session.",
+    "Block access for the session.",
+    // Object first: the previously bypassable order.
+    "Access granted.",
+    "Access is granted.",
+    "Access allowed.",
+    "Access was denied.",
+    "Access has been approved.",
+    "Login approved.",
+    "The sign-in was permitted.",
+    // Trust and proceed phrasings.
+    "This user should be trusted.",
+    "The account can be trusted going forward.",
+    "should be trusted",
+    "Let this user proceed.",
+    "Let them proceed to the protected action.",
+    "Allow the user to proceed.",
+    "The session may proceed.",
+    // Verification waivers.
+    "No further verification needed.",
+    "No further verification is required.",
+    "No additional checks are necessary.",
+    "No verification needed.",
+    "Verification is not required.",
+    "Step-up is unnecessary.",
+    // Bare authorization vocabulary.
+    "The request is authorized.",
+    "Authorisation is complete.",
+    "This authorizes the action.",
+  ];
+  for (const text of blocked) {
+    assert.throws(
+      () => validateExplanation(goodExplanation({ summary: text })),
+      /authorization statement/,
+      `expected to be blocked: ${text}`
+    );
+  }
+
+  const allowed = [
+    "Several timing signals differ from baseline.",
+    "Key hold duration increased compared with the stored template.",
+    "Use Odysseus's configured verification flow.",
+    "Complete the verification step shown on screen.",
+    "Verification is required before the protected action.",
+    "Typing rhythm shifted across the sampled window.",
+    "The measured deviation is larger than the recorded baseline.",
+  ];
+  for (const text of allowed) {
+    assert.doesNotThrow(
+      () => validateExplanation(goodExplanation({ summary: text })),
+      `expected to be allowed: ${text}`
+    );
+  }
+});
+
+test("applies the authorization filter to every explanation field", () => {
+  const fields = [
+    { headline: "Access granted" },
+    { summary: "Access granted." },
+    { nextStep: "Access granted." },
+    { observations: ["Access granted."] },
+  ];
+  for (const overrides of fields) {
+    assert.throws(
+      () => validateExplanation(goodExplanation(overrides)),
+      /authorization statement/,
+      `expected to be blocked: ${JSON.stringify(overrides)}`
+    );
+  }
 });
 
 test("keeps Hugging Face analysis shadow-only with no grant effect", async () => {
@@ -287,6 +454,125 @@ test("rejects identifiers and malformed provider output in shadow analysis", asy
   assert.equal(result.available, true);
   assert.equal(result.code, "HUGGING_FACE_INVALID_RESPONSE");
   assert.equal(result.authorizationDecision, null);
+});
+
+test("retries a retryable provider failure exactly once", async () => {
+  let geminiCalls = 0;
+  const gemini = createGeminiExplanationAdapter({
+    apiKey: "test-gemini-key",
+    fetchImpl: async () => {
+      geminiCalls += 1;
+      return geminiCalls === 1
+        ? jsonResponse({ error: "overloaded" }, 503)
+        : jsonResponse(interactionResponse(goodExplanation()));
+    },
+  });
+  const explained = await gemini.explain(behaviorReport());
+  assert.equal(geminiCalls, 2);
+  assert.equal(explained.generated, true);
+  assert.equal(explained.authorizationDecision, null);
+
+  let huggingFaceCalls = 0;
+  const huggingFace = createHuggingFaceAnomalyAdapter({
+    endpointUrl: "https://hf.test/anomaly",
+    allowedHosts: ["hf.test"],
+    fetchImpl: async () => {
+      huggingFaceCalls += 1;
+      return huggingFaceCalls === 1
+        ? jsonResponse({ error: "loading" }, 429)
+        : jsonResponse({ anomalyScore: 0.4, label: "normal" });
+    },
+  });
+  const analyzed = await huggingFace.analyze(shadowReport());
+  assert.equal(huggingFaceCalls, 2);
+  assert.equal(analyzed.analyzed, true);
+  assert.equal(analyzed.shadowOnly, true);
+  assert.equal(analyzed.grantEffect, "none");
+  assert.equal(analyzed.authorizationDecision, null);
+});
+
+test("stops after the single retry and never retries client errors", async () => {
+  let rejectedCalls = 0;
+  const rejecting = createGeminiExplanationAdapter({
+    apiKey: "test-gemini-key",
+    fetchImpl: async () => {
+      rejectedCalls += 1;
+      return jsonResponse({ error: "bad request" }, 400);
+    },
+  });
+  const rejected = await rejecting.explain(behaviorReport());
+  assert.equal(rejectedCalls, 1);
+  assert.equal(rejected.generated, false);
+  assert.equal(rejected.code, "GEMINI_UNAVAILABLE");
+  assert.equal(rejected.advisoryOnly, true);
+  assert.equal(rejected.authorizationDecision, null);
+
+  let unstableCalls = 0;
+  const unstable = createGeminiExplanationAdapter({
+    apiKey: "test-gemini-key",
+    fetchImpl: async () => {
+      unstableCalls += 1;
+      return jsonResponse({ error: "overloaded" }, 503);
+    },
+  });
+  const failed = await unstable.explain(behaviorReport());
+  assert.equal(unstableCalls, 2);
+  assert.equal(failed.generated, false);
+  assert.equal(failed.code, "GEMINI_UNAVAILABLE");
+  assert.equal(failed.retryable, true);
+  assert.equal(failed.authorizationDecision, null);
+});
+
+test("configures provider timeouts from the environment", () => {
+  assert.equal(
+    createGeminiExplanationAdapter({
+      apiKey: "test-gemini-key",
+      env: {},
+    }).timeoutMs,
+    5_000
+  );
+  assert.equal(
+    createGeminiExplanationAdapter({
+      apiKey: "test-gemini-key",
+      env: { ODYSSEUS_GEMINI_TIMEOUT_MS: "1200" },
+    }).timeoutMs,
+    1_200
+  );
+  assert.equal(
+    createGeminiExplanationAdapter({
+      apiKey: "test-gemini-key",
+      timeoutMs: 2_000,
+      env: { ODYSSEUS_GEMINI_TIMEOUT_MS: "1200" },
+    }).timeoutMs,
+    2_000
+  );
+  assert.equal(
+    createHuggingFaceAnomalyAdapter({
+      endpointUrl: "https://hf.test/anomaly",
+      allowedHosts: ["hf.test"],
+      env: {},
+    }).timeoutMs,
+    3_000
+  );
+  assert.equal(
+    createHuggingFaceAnomalyAdapter({
+      endpointUrl: "https://hf.test/anomaly",
+      allowedHosts: ["hf.test"],
+      env: { ODYSSEUS_HUGGING_FACE_TIMEOUT_MS: "900" },
+    }).timeoutMs,
+    900
+  );
+  for (const value of ["0", "-1", "30001", "not-a-number", "1.5"]) {
+    assert.throws(
+      () =>
+        createGeminiExplanationAdapter({
+          apiKey: "test-gemini-key",
+          env: { ODYSSEUS_GEMINI_TIMEOUT_MS: value },
+        }),
+      /between 1 and 30000/,
+      `expected rejection for ${value}`
+    );
+  }
 });
 
 test("delivers in-app by default and supports injected channels", async () => {

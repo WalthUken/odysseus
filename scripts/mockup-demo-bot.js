@@ -11,8 +11,6 @@
  *   SLOW=2 node scripts/mockup-demo-bot.js                      # 2x slower
  */
 
-const path = require('path');
-const { pathToFileURL } = require('url');
 const { chromium } = require('playwright');
 
 // The mockup only accepts these; override with env vars if the page changes.
@@ -27,9 +25,11 @@ const ANSWERS = {
 };
 
 const SLOW = Number(process.env.SLOW || 1);
-const LOGIN_URL = pathToFileURL(
-  path.join(__dirname, '..', 'mockup_website', 'login.html')
-).href;
+// The mockup must be loaded over HTTP, not file://. Sign-in, password recovery
+// and the silent telemetry upload are all same-origin fetches against the
+// mockup server, and every one of them fails from a file:// page.
+const MOCKUP_ORIGIN = process.env.MOCKUP_ORIGIN || 'http://127.0.0.1:4000';
+const LOGIN_URL = `${MOCKUP_ORIGIN}/login.html`;
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms * SLOW));
 
@@ -130,7 +130,16 @@ async function main() {
   const page = await context.newPage();
 
   console.log(`open   -> ${LOGIN_URL}`);
-  await page.goto(LOGIN_URL);
+  try {
+    await page.goto(LOGIN_URL);
+  } catch (error) {
+    await browser.close();
+    throw new Error(
+      `Could not open ${LOGIN_URL}. Start the mockup with `
+      + `"node mockup_website/server.js" (and Odysseus with "npm start") first.\n`
+      + error.message,
+    );
+  }
   await page.evaluate(() => localStorage.clear());
   await page.reload();
   await ensureCursor(page);

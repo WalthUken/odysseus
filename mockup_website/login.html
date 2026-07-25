@@ -20,6 +20,9 @@
                 </div>
                 
                 <div id="login-error">Invalid username or password</div>
+                <div id="login-notice" style="color: #10b981; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2); padding: 0.75rem; border-radius: 8px; margin-bottom: 1.5rem; font-size: 0.875rem; display: none;">
+                    Password updated. Sign in with your new password.
+                </div>
 
                 <form id="login-form">
                     <div class="input-group">
@@ -37,7 +40,11 @@
                     </button>
                 </form>
 
-                <p class="auth-switch">
+                <p class="auth-switch" style="margin-top: 1rem;">
+                    <a href="#" id="show-recovery">Forgot your password?</a>
+                </p>
+
+                <p class="auth-switch" style="margin-top: 0.75rem;">
                     Don't have an account?
                     <a href="#" id="show-signup">Create an account</a>
                 </p>
@@ -67,6 +74,49 @@
                         <label for="confirm-password">Confirm password</label>
                     </div>
 
+                    <p style="margin: -0.5rem 0 1.25rem; text-align: center; font-size: 0.85rem; color: var(--text-secondary);">
+                        <a href="#" id="toggle-recovery-setup" style="color: var(--accent-color); text-decoration: none; font-weight: 500;">
+                            Add password recovery questions (optional)
+                        </a>
+                    </p>
+
+                    <div id="signup-recovery-fields" style="display: none;">
+                        <p style="margin-bottom: 1.25rem; font-size: 0.8rem; color: var(--text-secondary);">
+                            Optional. These are only used if you ever forget your password.
+                            Leave them blank to skip.
+                        </p>
+
+                        <div class="input-group">
+                            <input type="text" id="signup-maiden-name" placeholder=" " autocomplete="off">
+                            <label for="signup-maiden-name">What's your mother's maiden name?</label>
+                        </div>
+
+                        <div class="input-group">
+                            <input type="text" id="signup-highschool" placeholder=" " autocomplete="off">
+                            <label for="signup-highschool">What was your first highschool?</label>
+                        </div>
+
+                        <div class="input-group">
+                            <input type="text" id="signup-pet" placeholder=" " autocomplete="off">
+                            <label for="signup-pet">What was the name of your first pet?</label>
+                        </div>
+
+                        <div class="input-group">
+                            <label style="position: static; margin-bottom: 0.8rem; display: block; color: var(--text-secondary); font-size: 0.875rem;">What is your sex?</label>
+                            <div style="display: flex; gap: 1.5rem; color: var(--text-primary); font-size: 0.95rem; margin-top: 0.5rem;">
+                                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                                    <input type="radio" name="signup-sex" value="male" style="width: auto; margin: 0; padding: 0; box-shadow: none;"> Male
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                                    <input type="radio" name="signup-sex" value="female" style="width: auto; margin: 0; padding: 0; box-shadow: none;"> Female
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                                    <input type="radio" name="signup-sex" value="other" style="width: auto; margin: 0; padding: 0; box-shadow: none;"> Other
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
                     <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">
                         Create Account
                     </button>
@@ -78,11 +128,38 @@
                 </p>
             </div>
 
+            <div id="step-recover" style="display: none;">
+                <div class="login-header">
+                    <h1>Password Recovery</h1>
+                    <p>Tell us which account needs a new password</p>
+                </div>
+
+                <div id="recover-error" style="color: var(--danger-color); background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); padding: 0.75rem; border-radius: 8px; margin-bottom: 1.5rem; font-size: 0.875rem; display: none;"></div>
+
+                <form id="recover-form">
+                    <div class="input-group">
+                        <input type="text" id="recover-username" placeholder=" " required autocomplete="off">
+                        <label for="recover-username">Username</label>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">
+                        Continue
+                    </button>
+                </form>
+
+                <p class="auth-switch">
+                    Remembered it?
+                    <a href="#" id="recover-cancel">Back to sign in</a>
+                </p>
+            </div>
+
             <div id="step-2" style="display: none;">
                 <div class="login-header">
                     <h1>Security Questions</h1>
-                    <p id="security-subtitle">Please verify your identity to proceed</p>
+                    <p id="security-subtitle">Answer the questions you saved to recover this account</p>
                 </div>
+
+                <div id="security-error" style="color: var(--danger-color); background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); padding: 0.75rem; border-radius: 8px; margin-bottom: 1.5rem; font-size: 0.875rem; display: none;"></div>
 
                 <form id="security-form">
                     <div class="input-group">
@@ -116,11 +193,44 @@
                     </div>
                     
                     <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">
-                        Verify & Access Terminal
+                        Verify Answers
                     </button>
                 </form>
+
+                <p class="auth-switch">
+                    <a href="#" id="security-cancel">Back to sign in</a>
+                </p>
             </div>
-            
+
+            <div id="step-reset" style="display: none;">
+                <div class="login-header">
+                    <h1>New Password</h1>
+                    <p>Choose the password you'll use from now on</p>
+                </div>
+
+                <div id="reset-error" style="color: var(--danger-color); background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); padding: 0.75rem; border-radius: 8px; margin-bottom: 1.5rem; font-size: 0.875rem; display: none;"></div>
+
+                <form id="reset-form">
+                    <div class="input-group">
+                        <input type="password" id="reset-password" placeholder=" " required>
+                        <label for="reset-password">New password</label>
+                    </div>
+
+                    <div class="input-group">
+                        <input type="password" id="reset-confirm" placeholder=" " required>
+                        <label for="reset-confirm">Confirm new password</label>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">
+                        Update Password
+                    </button>
+                </form>
+
+                <p class="auth-switch">
+                    <a href="#" id="reset-cancel">Back to sign in</a>
+                </p>
+            </div>
+
             <div style="margin-top: 2rem; text-align: center; font-size: 0.85rem; color: var(--text-secondary);">
                 <p>Demo credentials:<br>Username: <strong>username</strong> | Password: <strong>password</strong></p>
             </div>

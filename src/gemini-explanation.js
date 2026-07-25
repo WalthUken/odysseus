@@ -10,13 +10,74 @@ const {
   requireExactKeys,
 } = require("./provider-utils");
 
+// Gemini Interactions API. Verified against the official documentation on
+// 2026-07-25: https://ai.google.dev/gemini-api/docs/interactions/quickstart
+// The key travels in the x-goog-api-key header, never in the URL.
 const GEMINI_API_ROOT =
   "https://generativelanguage.googleapis.com/v1beta/interactions";
 const MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const FEATURE_PATTERN = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
 const REASON_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/;
-const AUTHORIZATION_LANGUAGE =
-  /\b(authori[sz](?:e|ed|ation)|grant(?:ed)? access|deny access|access (?:is )?(?:allowed|denied)|approve(?:d)? access)\b/i;
+const DEFAULT_TIMEOUT_MS = 5_000;
+
+// Advisory prose must never sound authoritative. The filter is deliberately
+// word-order independent: "grant access" and "access granted" are the same
+// claim, and either one would let generated prose impersonate a decision.
+const AUTHORIZATION_OBJECT =
+  "(?:access|entry|admission|login|log[ -]?in|sign[ -]?in)";
+const AUTHORIZATION_SUBJECT =
+  "(?:access|entry|admission|login|log[ -]?in|sign[ -]?in"
+  + "|(?:the|this|that|their)\\s+"
+  + "(?:user|person|account|session|request|device|actor|attempt))";
+const AUTHORIZATION_VERB =
+  "(?:grants?|granted|granting|den(?:y|ies|ied|ying)"
+  + "|allows?|allowed|allowing|approves?|approved|approving"
+  + "|permits?|permitted|permitting|blocks?|blocked|blocking"
+  + "|rejects?|rejected|rejecting|clears?|cleared|clearing)";
+const AUTHORIZATION_PARTICIPLE =
+  "(?:granted|denied|allowed|approved|permitted|blocked|rejected"
+  + "|cleared|trusted|authori[sz]ed)";
+const AUTHORIZATION_MODAL =
+  "(?:is|are|was|were|has\\s+been|have\\s+been|had\\s+been|to\\s+be|be"
+  + "|(?:should|shall|can|could|may|might|must|will|would)\\s+be)";
+const AUTHORIZATION_CHALLENGE =
+  "(?:verification|authentication|challenges?|step[ -]?up|checks?"
+  + "|review|scrutiny)";
+const AUTHORIZATION_LANGUAGE = new RegExp(
+  [
+    // "authorize", "authorised", "authorization"
+    "\\bauthori[sz](?:e|es|ed|ing|ation|ations)\\b",
+    // Verb first: "grant access", "denied the user access".
+    "\\b" + AUTHORIZATION_VERB + "\\s+"
+      + "(?:(?:the|this|that|their)\\s+)?"
+      + "(?:(?:user|person|account|session|request|device)(?:'s|s')?\\s+)?"
+      + AUTHORIZATION_OBJECT + "\\b",
+    // Object first: "access granted", "the user should be trusted".
+    "\\b" + AUTHORIZATION_SUBJECT + "\\s+"
+      + "(?:" + AUTHORIZATION_MODAL + "\\s+)?"
+      + AUTHORIZATION_PARTICIPLE + "\\b",
+    // Subjectless verdicts: "should be trusted", "can be allowed".
+    "\\b(?:should|shall|can|could|may|might|must|will|would)\\s+"
+      + "(?:be\\s+)?(?:safely\\s+)?" + AUTHORIZATION_PARTICIPLE + "\\b",
+    // "let this user proceed", "allow them to proceed".
+    "\\b(?:lets?|allows?|permits?)\\s+"
+      + "(?:(?:this|the|that|their|them|him|her|it|us)\\s+)?"
+      + "(?:(?:user|person|account|session|request|device)\\s+)?"
+      + "(?:to\\s+)?proceed\\b",
+    "\\b(?:may|can|should|shall|must|will|free\\s+to|safe\\s+to"
+      + "|ok(?:ay)?\\s+to|clear(?:ed)?\\s+to)\\s+proceed\\b",
+    // "no further verification needed" and its variants.
+    "\\bno\\s+(?:further|additional|more|extra|other)\\s+"
+      + AUTHORIZATION_CHALLENGE + "\\b",
+    "\\bno\\s+(?:(?:further|additional|more|extra|other)\\s+)?"
+      + AUTHORIZATION_CHALLENGE + "\\s+(?:(?:is|are|was|were)\\s+)?"
+      + "(?:needed|required|necessary|warranted)\\b",
+    "\\b" + AUTHORIZATION_CHALLENGE + "\\s+(?:(?:is|are|was|were)\\s+)?"
+      + "(?:not\\s+(?:needed|required|necessary)|unnecessary"
+      + "|no\\s+longer\\s+(?:needed|required|necessary))\\b",
+  ].join("|"),
+  "i"
+);
 
 const EXPLANATION_SCHEMA = Object.freeze({
   type: "object",
@@ -34,6 +95,42 @@ const EXPLANATION_SCHEMA = Object.freeze({
   },
   required: ["headline", "summary", "observations", "nextStep"],
 });
+
+function resolveTimeoutMs(value, fallback) {
+  if (value === undefined || value === null || value === "") {
+    return fallback;
+  }
+  const timeoutMs = Number(value);
+  if (
+    !Number.isSafeInteger(timeoutMs)
+    || timeoutMs < 1
+    || timeoutMs > 30_000
+  ) {
+    throw new TypeError(
+      "Gemini timeoutMs must be an integer between 1 and 30000."
+    );
+  }
+  return timeoutMs;
+}
+
+// One bounded retry, and only for failures the transport marked retryable
+// (HTTP 429, HTTP 5xx, transport loss, timeout). A caller-driven abort is
+// never retried, so worst-case wall clock stays at two timeout windows.
+async function fetchJsonWithSingleRetry(request) {
+  try {
+    return await fetchJson(request);
+  } catch (error) {
+    if (
+      !error
+      || error.retryable !== true
+      || error.code === "PROVIDER_ABORTED"
+      || (request.signal && request.signal.aborted)
+    ) {
+      throw error;
+    }
+    return fetchJson(request);
+  }
+}
 
 function validateBehaviorReport(report) {
   requireExactKeys(
@@ -195,7 +292,11 @@ class GeminiExplanationAdapter {
     this.apiKey = options.apiKey || null;
     this.model = String(options.model ?? "gemini-3.6-flash");
     this.fetchImpl = options.fetchImpl;
-    this.timeoutMs = Number(options.timeoutMs ?? 5_000);
+    const env = options.env ?? process.env;
+    this.timeoutMs = resolveTimeoutMs(
+      options.timeoutMs ?? env.ODYSSEUS_GEMINI_TIMEOUT_MS,
+      DEFAULT_TIMEOUT_MS
+    );
     this.monitoring = options.monitoring;
     this.state = this.apiKey ? "unchecked" : "disabled";
     if (!MODEL_PATTERN.test(this.model)) {
@@ -267,7 +368,7 @@ class GeminiExplanationAdapter {
 
     const started = Date.now();
     try {
-      const response = await fetchJson({
+      const response = await fetchJsonWithSingleRetry({
         fetchImpl: this.fetchImpl,
         url: GEMINI_API_ROOT,
         headers: {
@@ -279,11 +380,26 @@ class GeminiExplanationAdapter {
         maximumBytes: 256 * 1_024,
         signal: options.signal,
       });
-      const modelOutput = response
-        && Array.isArray(response.steps)
-        && [...response.steps]
-          .reverse()
-          .find((step) => step && step.type === "model_output");
+      // A safety block, a failed interaction, or an empty step timeline is a
+      // clean provider failure, never a partially trusted explanation.
+      // `promptFeedback` covers blocked payloads from the older response shape.
+      const steps =
+        response && Array.isArray(response.steps) ? response.steps : [];
+      if (
+        !response
+        || response.promptFeedback
+        || response.status === "failed"
+        || response.status === "cancelled"
+        || steps.length === 0
+      ) {
+        throw new ProviderInputError(
+          "Gemini blocked or failed the interaction.",
+          "INVALID_PROVIDER_RESPONSE"
+        );
+      }
+      const modelOutput = [...steps]
+        .reverse()
+        .find((step) => step && step.type === "model_output");
       const textPart = modelOutput
         && Array.isArray(modelOutput.content)
         && modelOutput.content.find(

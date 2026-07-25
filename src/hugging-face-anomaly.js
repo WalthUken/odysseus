@@ -16,6 +16,43 @@ const DEFAULT_ALLOWED_HOSTS = Object.freeze([
   "api-inference.huggingface.co",
   "router.huggingface.co",
 ]);
+const DEFAULT_TIMEOUT_MS = 3_000;
+
+function resolveTimeoutMs(value, fallback) {
+  if (value === undefined || value === null || value === "") {
+    return fallback;
+  }
+  const timeoutMs = Number(value);
+  if (
+    !Number.isSafeInteger(timeoutMs)
+    || timeoutMs < 1
+    || timeoutMs > 30_000
+  ) {
+    throw new TypeError(
+      "Hugging Face timeoutMs must be an integer between 1 and 30000."
+    );
+  }
+  return timeoutMs;
+}
+
+// One bounded retry, and only for failures the transport marked retryable
+// (HTTP 429, HTTP 5xx, transport loss, timeout). A caller-driven abort is
+// never retried, so worst-case wall clock stays at two timeout windows.
+async function fetchJsonWithSingleRetry(request) {
+  try {
+    return await fetchJson(request);
+  } catch (error) {
+    if (
+      !error
+      || error.retryable !== true
+      || error.code === "PROVIDER_ABORTED"
+      || (request.signal && request.signal.aborted)
+    ) {
+      throw error;
+    }
+    return fetchJson(request);
+  }
+}
 
 function validateShadowReport(report) {
   requireExactKeys(
@@ -135,7 +172,11 @@ class HuggingFaceAnomalyAdapter {
     this.apiToken =
       options.apiToken || null;
     this.fetchImpl = options.fetchImpl;
-    this.timeoutMs = Number(options.timeoutMs ?? 3_000);
+    const env = options.env ?? process.env;
+    this.timeoutMs = resolveTimeoutMs(
+      options.timeoutMs ?? env.ODYSSEUS_HUGGING_FACE_TIMEOUT_MS,
+      DEFAULT_TIMEOUT_MS
+    );
     this.monitoring = options.monitoring;
     this.state = this.endpointUrl ? "unchecked" : "disabled";
     if (
@@ -193,7 +234,7 @@ class HuggingFaceAnomalyAdapter {
 
     const started = Date.now();
     try {
-      const response = await fetchJson({
+      const response = await fetchJsonWithSingleRetry({
         fetchImpl: this.fetchImpl,
         url: this.endpointUrl,
         headers,

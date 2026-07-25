@@ -20,6 +20,8 @@ class TestHttpError extends Error {
   }
 }
 
+// Deliberately a version 1 template: it predates activeFeatureKeys, so it also
+// covers the legacy path where every stored feature is comparable.
 function sampleProfile() {
   return {
     profileId: "primary",
@@ -44,6 +46,51 @@ function sampleProfile() {
       scales: {
         dwellMean: 4,
         flightMean: 3,
+      },
+      acceptanceThreshold: 2,
+      enrolledAt: "2026-07-25T12:00:00.000Z",
+    },
+  };
+}
+
+// A baseline enrolled from pointer movement alone: the keyboard families are
+// stored but carry no signal, so they are inert and are not scored.
+function pointerOnlyProfile() {
+  return {
+    profileId: "pointer-only",
+    sampleCount: 5,
+    featureCount: 4,
+    enrolledAt: "2026-07-25T12:00:00.000Z",
+    updatedAt: "2026-07-25T12:00:00.000Z",
+    templateVersion: 2,
+    encryptedTemplate: "ciphertext-must-not-escape",
+    template: {
+      version: 2,
+      sampleCount: 5,
+      featureKeys: [
+        "dwellMean",
+        "flightMean",
+        "pointerJitterMean",
+        "pointerVelocityMean",
+      ],
+      activeFeatureKeys: ["pointerJitterMean", "pointerVelocityMean"],
+      means: {
+        dwellMean: 0,
+        flightMean: 0,
+        pointerJitterMean: 0.31,
+        pointerVelocityMean: 250,
+      },
+      deviations: {
+        dwellMean: 0,
+        flightMean: 0,
+        pointerJitterMean: 0.01,
+        pointerVelocityMean: 8,
+      },
+      scales: {
+        dwellMean: 0.000001,
+        flightMean: 0.000001,
+        pointerJitterMean: 0.01,
+        pointerVelocityMean: 8,
       },
       acceptanceThreshold: 2,
       enrolledAt: "2026-07-25T12:00:00.000Z",
@@ -252,6 +299,35 @@ function strongSamples(overrides = {}) {
   }));
 }
 
+// Real typing plus continued cursor work, supplied to a pointer-only baseline.
+function amplificationSamples(overrides = {}) {
+  return [
+    {
+      dwellMean: 95,
+      flightMean: 120,
+      pointerJitterMean: 0.31,
+      pointerVelocityMean: 250,
+    },
+    {
+      dwellMean: 97,
+      flightMean: 123,
+      pointerJitterMean: 0.315,
+      pointerVelocityMean: 252,
+    },
+    {
+      dwellMean: 96,
+      flightMean: 118,
+      pointerJitterMean: 0.305,
+      pointerVelocityMean: 248,
+    },
+  ].map((vector) => ({
+    vector,
+    diagnostics: strongDiagnostics(),
+    interactionEvidence: strongEvidence(),
+    ...overrides,
+  }));
+}
+
 test("the local admin report returns bounded fields and redacts secrets", async () => {
   const report = await buildAccountDemoReport(
     reportDatabase(),
@@ -268,6 +344,10 @@ test("the local admin report returns bounded fields and redacts secrets", async 
   assert.equal(report.demoOnly, true);
   assert.equal(report.account.username, "person-a");
   assert.equal(report.fingerprints.length, 1);
+  assert.equal(report.fingerprints[0].activeFeatureCount, 2);
+  assert.ok(
+    report.fingerprints[0].features.every((feature) => feature.comparable),
+  );
   assert.equal(report.securityPosture.passkeys, 1);
   for (const secret of [
     "credential-verifier-must-not-escape",
@@ -482,6 +562,125 @@ test("/admin/test never applies automation-risk samples to the template", async 
   assert.equal(setProfileCalls, 0);
 });
 
+test("/admin/test adopts inert keyboard families into a pointer-only baseline", async () => {
+  const profile = pointerOnlyProfile();
+  let savedTemplate = null;
+  const harness = routeHarness({
+    database: {
+      async getProfile() {
+        return profile;
+      },
+      async setProfile(_userId, profileId, template) {
+        assert.equal(profileId, profile.profileId);
+        savedTemplate = template;
+        return {
+          profileId,
+          sampleCount: template.sampleCount,
+        };
+      },
+    },
+  });
+  const response = responseHarness();
+
+  await harness.testHandler({
+    body: {
+      username: "person-a",
+      password: "correct-local-code",
+      profileId: profile.profileId,
+      demoSubjectLabel: "Human A",
+      samples: amplificationSamples(),
+    },
+    socket: {
+      remoteAddress: "127.0.0.1",
+    },
+  }, response);
+
+  const report = response.body.report;
+  assert.equal(response.statusCode, 201);
+  assert.equal(report.adoption.status, "applied");
+  assert.equal(report.adoption.reasonCode, "INERT_FEATURE_FAMILIES_ADOPTED");
+  assert.deepEqual(report.adoptedFeatures, ["dwellMean", "flightMean"]);
+  assert.equal(report.adoption.previousActiveFeatureCount, 2);
+  assert.equal(report.adoption.activeFeatureCount, 4);
+
+  // The keyboard families are now measured rather than skipped.
+  assert.ok(savedTemplate);
+  assert.deepEqual(
+    savedTemplate.activeFeatureKeys,
+    profile.template.featureKeys,
+  );
+  assert.ok(savedTemplate.means.dwellMean > 90);
+  assert.ok(savedTemplate.means.flightMean > 110);
+  assert.ok(savedTemplate.scales.dwellMean > 0.000001);
+  assert.ok(savedTemplate.scales.flightMean > 0.000001);
+
+  // Adoption is additive: the already-active pointer families keep their
+  // baseline and the acceptance threshold is never loosened.
+  assert.equal(
+    savedTemplate.acceptanceThreshold,
+    profile.template.acceptanceThreshold,
+  );
+  assert.ok(
+    Math.abs(
+      savedTemplate.means.pointerVelocityMean
+      - profile.template.means.pointerVelocityMean,
+    ) < 1,
+  );
+  assert.equal(report.amendment.status, "applied");
+  assert.equal(
+    savedTemplate.sampleCount,
+    profile.template.sampleCount + 3,
+  );
+});
+
+test("/admin/test never adopts inert families from untrusted samples", async () => {
+  const profile = pointerOnlyProfile();
+  let setProfileCalls = 0;
+  const harness = routeHarness({
+    database: {
+      async getProfile() {
+        return profile;
+      },
+      async setProfile() {
+        setProfileCalls += 1;
+      },
+    },
+  });
+  const response = responseHarness();
+
+  await harness.testHandler({
+    body: {
+      username: "person-a",
+      password: "correct-local-code",
+      profileId: profile.profileId,
+      demoSubjectLabel: "Human A",
+      samples: amplificationSamples({
+        interactionEvidence: strongEvidence({
+          sampleCounts: {
+            dwell: 4,
+            flight: 3,
+            downDown: 3,
+            pointer: 2,
+          },
+        }),
+      }),
+    },
+    socket: {
+      remoteAddress: "127.0.0.1",
+    },
+  }, response);
+
+  assert.equal(response.statusCode, 201);
+  assert.equal(response.body.report.adoption.status, "not_applied");
+  assert.equal(
+    response.body.report.adoption.reasonCode,
+    "UNTRUSTED_ADMIN_TEST_SAMPLES_NOT_ADOPTED",
+  );
+  assert.deepEqual(response.body.report.adoptedFeatures, []);
+  assert.equal(response.body.report.adoption.activeFeatureCount, 2);
+  assert.equal(setProfileCalls, 0);
+});
+
 test("the credential burst limiter blocks the eleventh attempt in two seconds", () => {
   let now = 1_000;
   const limited = [];
@@ -528,4 +727,111 @@ test("the credential burst limiter blocks the eleventh attempt in two seconds", 
   });
   assert.equal(afterWindow.statusCode, 200);
   assert.equal(successfulMiddlewareCalls, 11);
+});
+
+test("/admin/test still amplifies a profile when the session has drifted", async () => {
+  // The point of the hidden test is to strengthen a profile, and a person's
+  // pointer behaviour on the day they run it will rarely land dead on the
+  // baseline. Inert families have no stored baseline to drift from, so a
+  // drifted-but-not-rejected session must still be able to teach them.
+  const profile = pointerOnlyProfile();
+  let savedTemplate = null;
+  const harness = routeHarness({
+    database: {
+      async getProfile() {
+        return profile;
+      },
+      async setProfile(_userId, _profileId, template) {
+        savedTemplate = template;
+        return { profileId: profile.profileId, sampleCount: template.sampleCount };
+      },
+    },
+  });
+  const response = responseHarness();
+
+  // Pointer velocity sits far enough off the baseline to force step_up rather
+  // than allow, while staying inside the mismatch boundary.
+  const drifted = amplificationSamples().map((sample, index) => ({
+    ...sample,
+    vector: {
+      ...sample.vector,
+      pointerVelocityMean: 300 + index,
+    },
+  }));
+
+  await harness.testHandler({
+    body: {
+      username: "person-a",
+      password: "correct-local-code",
+      profileId: profile.profileId,
+      demoSubjectLabel: "Human A",
+      samples: drifted,
+    },
+    socket: { remoteAddress: "127.0.0.1" },
+  }, response);
+
+  const report = response.body.report;
+  assert.equal(response.statusCode, 201);
+  assert.ok(
+    report.samples.every((sample) => sample.decision !== "allow"),
+    "fixture should drift rather than match outright",
+  );
+
+  // The new keyboard families are learned even though identity only drifted.
+  assert.equal(report.adoption.status, "applied");
+  assert.deepEqual(report.adoptedFeatures, ["dwellMean", "flightMean"]);
+  assert.equal(report.adoption.activeFeatureCount, 4);
+  assert.ok(savedTemplate);
+  assert.ok(savedTemplate.means.dwellMean > 90);
+
+  // Drift is held to the stricter bar, so the existing pointer baseline is
+  // never rewritten by a session that failed to match it.
+  assert.notEqual(report.amendment.status, "applied");
+  assert.equal(
+    savedTemplate.means.pointerVelocityMean,
+    profile.template.means.pointerVelocityMean,
+  );
+});
+
+test("/admin/test refuses to amplify when identity is rejected outright", async () => {
+  const profile = pointerOnlyProfile();
+  let setProfileCalls = 0;
+  const harness = routeHarness({
+    database: {
+      async getProfile() {
+        return profile;
+      },
+      async setProfile() {
+        setProfileCalls += 1;
+        return { profileId: profile.profileId, sampleCount: 5 };
+      },
+    },
+  });
+  const response = responseHarness();
+
+  const mismatched = amplificationSamples().map((sample, index) => ({
+    ...sample,
+    vector: {
+      ...sample.vector,
+      pointerVelocityMean: 900 + index,
+      pointerJitterMean: 0.9,
+    },
+  }));
+
+  await harness.testHandler({
+    body: {
+      username: "person-a",
+      password: "correct-local-code",
+      profileId: profile.profileId,
+      demoSubjectLabel: "Human B",
+      samples: mismatched,
+    },
+    socket: { remoteAddress: "127.0.0.1" },
+  }, response);
+
+  const report = response.body.report;
+  assert.ok(report.samples.some((sample) => sample.decision === "deny"));
+  assert.equal(report.adoption.status, "not_applied");
+  assert.deepEqual(report.adoptedFeatures, []);
+  assert.equal(setProfileCalls, 0);
 });

@@ -2,6 +2,7 @@
 
 const {
   ValidationError,
+  comparableFeatureKeys,
   evaluateVector,
   scaledManhattanDistance,
   validateFeatureVector,
@@ -115,28 +116,72 @@ function reducedTemplate(template, featureNames) {
     deviations[name] = template.deviations[name];
     scales[name] = template.scales[name];
   }
-  return {
+  const projected = {
     ...template,
     featureKeys: [...featureNames],
     means,
     deviations,
     scales,
   };
+  // activeFeatureKeys must be narrowed alongside featureKeys, or the projection
+  // would still claim features whose scales it no longer carries.
+  const activeInProjection = Array.isArray(template.activeFeatureKeys)
+    ? featureNames.filter((name) => template.activeFeatureKeys.includes(name))
+    : null;
+  if (activeInProjection && activeInProjection.length > 0) {
+    projected.activeFeatureKeys = activeInProjection;
+  } else {
+    // Nothing comparable survives the projection; fall back to treating every
+    // projected feature as comparable so scoring stays defined.
+    delete projected.activeFeatureKeys;
+  }
+  return projected;
 }
 
+// Coverage requirements are measured against the features the template can
+// actually compare. A profile enrolled from one interaction surface only (for
+// example pointer-only dashboard use) carries inert keyboard keys that no later
+// sample could ever satisfy, so holding it to a two-family minimum would reject
+// every verification permanently.
 function minimumComparedFeatureCount(template) {
-  return Math.min(template.featureKeys.length, 4);
+  return Math.min(comparableFeatureKeys(template).length, 4);
 }
 
 function hasEnoughFeatureFamilies(template, comparedFeatureNames) {
   const templateFamilies = new Set(
-    template.featureKeys.map(familyForFeature).filter(Boolean),
+    comparableFeatureKeys(template).map(familyForFeature).filter(Boolean),
   );
   const comparedFamilies = new Set(
     comparedFeatureNames.map(familyForFeature).filter(Boolean),
   );
   const requiredFamilies = Math.min(templateFamilies.size, 2);
   return comparedFamilies.size >= requiredFamilies;
+}
+
+// Reports which of a template's features a sample could actually be scored
+// against, given how much of each interaction family the sample carries. The
+// verify route uses this so it reports honest coverage instead of assuming every
+// enrolled feature was compared.
+function describeFeatureCoverage(template, sampleCounts) {
+  const comparable = comparableFeatureKeys(template);
+  const families = sampleCounts
+    ? availableFamilies(sampleCounts)
+    : null;
+  const comparedFeatureNames = families
+    ? comparable.filter((name) => families.has(familyForFeature(name)))
+    : [...comparable];
+  const ignoredFeatureNames = template.featureKeys.filter(
+    (name) => !comparedFeatureNames.includes(name),
+  );
+
+  return {
+    comparedFeatureNames,
+    ignoredFeatureNames,
+    sufficient: (
+      comparedFeatureNames.length >= minimumComparedFeatureCount(template)
+      && hasEnoughFeatureFamilies(template, comparedFeatureNames)
+    ),
+  };
 }
 
 function validateEvidenceShape(behaviorEvidence) {
@@ -246,7 +291,9 @@ function evaluateCompatibleEvidence(template, behaviorEvidence) {
   }
 
   const families = availableFamilies(evidence.sampleCounts);
-  const comparedFeatureNames = current.featureKeys.filter((name) => (
+  // Only features the template can actually score count as compared; an inert
+  // feature contributes nothing and must not satisfy the coverage minimum.
+  const comparedFeatureNames = comparableFeatureKeys(current).filter((name) => (
     Object.hasOwn(validatedVector, name)
     && families.has(familyForFeature(name))
   ));
@@ -634,6 +681,7 @@ module.exports = {
   RETURN_MAX_DISTANCE_RATIO,
   RETURN_MAX_EVENT_SHIFT_IN_SCALES,
   buildBehaviorDecision,
+  describeFeatureCoverage,
   evaluateCompatibleEvidence,
   reinforceTrustedSample,
   validateEvidenceShape,

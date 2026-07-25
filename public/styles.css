@@ -4390,3 +4390,37 @@ body[data-app-view="login"] .app-content-root + footer {
     transform: none !important;
   }
 }
+
+/*
+ * Behavioral feedback suppression
+ * ---------------------------------------------------------------------------
+ * The signed-in console must never display telemetry or a behavioral verdict.
+ * That output is reachable only through the bypass-code gated /admin report.
+ *
+ * The markup for these surfaces is deliberately left in the document: app.js
+ * builds its `elements` map from a fixed `ids` object and aborts start-up with
+ * "Odysseus UI is missing required elements" when any of those ids is absent,
+ * and account.js binds its own ids the same way. Removing the nodes would stop
+ * the page from booting and would stop the silent telemetry collection that
+ * must keep running. So they are hidden here instead, and app.js no longer
+ * writes any score, state, reason, or risk level into them.
+ *
+ * These rules are a second line of defence behind the `hidden` attributes in
+ * index.html: they hold even if a script flips `element.hidden = false`.
+ */
+.behavior-access-warning,
+.trust-panel,
+.session-workspace .profile-bar,
+.enrollment-panel .progress-block,
+.enrollment-panel > .inline-status,
+.verification-panel > .inline-status,
+#enrollment-round-tag,
+#enrollment-trail-status,
+#verification-trail-status {
+  display: none !important;
+}
+
+/* The workflow column takes the full width once the trust panel is gone. */
+.workspace:has(> .trust-panel) {
+  grid-template-columns: minmax(0, 1fr);
+}

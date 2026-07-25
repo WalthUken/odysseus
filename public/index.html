@@ -59,9 +59,8 @@
             <h2 id="auth-title">Start a protected session</h2>
             <p>
               This local beta uses demo-only accounts. After sign-in, a few
-              short questions help set up the session. Entry timing is
-              compared automatically on returning sessions, without asking
-              you to identify yourself. Do not reuse a real password.
+              short questions help set up the session. Do not reuse a real
+              password.
             </p>
           </div>
         </div>
@@ -138,12 +137,22 @@
         </p>
       </section>
 
+      <!--
+        Retired behavioral review panel. The console must never tell a user
+        that a behavioral check ran or how it scored, so this block is
+        permanently hidden (hidden attribute plus a forced rule in
+        styles.css) and app.js no longer populates or reveals it. The markup
+        stays in the document only because bindElements() in app.js aborts
+        start-up when one of its required element ids is missing. The
+        behavioral verdict is available through the gated /admin report.
+      -->
       <section
         class="behavior-access-warning"
         id="behavior-access-warning"
         aria-labelledby="behavior-warning-title"
         aria-describedby="behavior-warning-summary"
         tabindex="-1"
+        aria-hidden="true"
         hidden
       >
         <div class="behavior-warning-icon" aria-hidden="true">!</div>
@@ -605,17 +614,22 @@
           </div>
           <div class="terminal-view-heading">
             <div>
-              <p class="terminal-kicker">Session security</p>
+              <p class="terminal-kicker">Account questions</p>
               <h1 id="session-workspace-title">Security questions</h1>
               <p>
-                Complete the short prompts naturally so this session can be
-                compared with the saved account setup.
+                Answer a few short questions to finish setting up your
+                account.
               </p>
             </div>
             <span class="terminal-status-chip">Local processing</span>
           </div>
 
-      <section class="profile-bar" aria-labelledby="profile-title">
+      <!--
+        Profile bar hidden: the profile ID and the reset control describe the
+        stored behavioral profile. The fields stay in the DOM because app.js
+        reads #profile-id for every /api/enroll and /api/verify call.
+      -->
+      <section class="profile-bar" aria-labelledby="profile-title" hidden>
         <div class="profile-heading">
           <span class="profile-icon" aria-hidden="true">ID</span>
           <div>
@@ -660,18 +674,22 @@
                 <p class="panel-kicker">Security setup</p>
                 <h2 id="enrollment-title">Answer setup questions</h2>
               </div>
-              <span class="phase-tag" id="enrollment-round-tag">
+              <!-- Round counter hidden: it reveals sample-by-sample progress. -->
+              <span class="phase-tag" id="enrollment-round-tag" hidden>
                 Round 1 of 5
               </span>
             </div>
 
             <p class="panel-copy">
-              Complete five brief questions. Each round includes a short
-              reading prompt, one response in your own words, and a quiet
-              confirmation check.
+              Answer a few short questions in your own words.
             </p>
 
-            <div class="assurance-note">
+            <!--
+              Assurance note hidden: it describes the anti-automation checks.
+              The copy is retained because test/server.test.js asserts the
+              served page still carries this disclaimer.
+            -->
+            <div class="assurance-note" hidden>
               <strong>What this check can establish</strong>
               <span>
                 Direct browser input is required, which blocks basic scripted
@@ -687,7 +705,8 @@
               <div class="challenge-meta-status">
                 <span id="enrollment-text-status">Response waiting</span>
                 <span id="enrollment-free-status">Open response later</span>
-                <span id="enrollment-trail-status">Activity collecting</span>
+                <!-- Trail status hidden: "Activity collecting" exposes capture. -->
+                <span id="enrollment-trail-status" hidden>Waiting</span>
               </div>
             </div>
 
@@ -778,7 +797,12 @@
               </div>
             </form>
 
-            <div class="progress-block">
+            <!--
+              Setup progress hidden: a "3 of 5" counter tells the user that a
+              behavioral baseline is being assembled. app.js keeps the count
+              internally and no longer writes to these nodes.
+            -->
+            <div class="progress-block" hidden>
               <div class="progress-label">
                 <span>Setup progress</span>
                 <strong id="enrollment-progress-label">0 of 5</strong>
@@ -800,11 +824,17 @@
               </div>
             </div>
 
+            <!--
+              Status line hidden: it reported setup progress and comparison
+              activity. app.js still writes neutral text here so the element
+              (required by bindElements) keeps its contract.
+            -->
             <p
               class="inline-status"
               id="enrollment-status"
               role="status"
               aria-live="polite"
+              hidden
             >
               Ready for the first question.
             </p>
@@ -827,9 +857,8 @@
             </div>
 
             <p class="panel-copy">
-              Complete one brief follow-up question to compare this session
-              with the saved setup. Written text is evaluated locally and
-              cleared after the result.
+              Answer one short follow-up question. Your text is processed
+              locally and cleared afterwards.
             </p>
 
             <div class="challenge-meta">
@@ -840,7 +869,8 @@
               <div class="challenge-meta-status">
                 <span id="verification-text-status">Response waiting</span>
                 <span id="verification-free-status">Open response later</span>
-                <span id="verification-trail-status">Activity collecting</span>
+                <!-- Trail status hidden: "Activity collecting" exposes capture. -->
+                <span id="verification-trail-status" hidden>Waiting</span>
               </div>
             </div>
 
@@ -925,7 +955,7 @@
 
               <div class="challenge-actions">
                 <span>
-                  Analysis starts automatically when all three tasks are ready
+                  Your answer is saved automatically once the tasks are ready
                 </span>
                 <button
                   class="button button-quiet"
@@ -938,16 +968,40 @@
               </div>
             </form>
 
+            <!--
+              Status line hidden: it previously printed the trust score and
+              the comparison outcome.
+            -->
             <p
               class="inline-status"
               id="verification-status"
               role="status"
               aria-live="polite"
+              hidden
             ></p>
           </section>
         </div>
 
-        <aside class="trust-panel" aria-labelledby="trust-title">
+        <!--
+          Retired session-decision panel. Everything inside it is behavioral
+          output the owner does not want a signed-in user to see: the trust
+          score and state, the decision reason, the automation risk card, the
+          raw signal metrics, and the authenticated technical report (which
+          renders keyboard timing, pointer patterns, and baseline
+          comparisons). The whole aside is hidden rather than deleted because
+          bindElements() in app.js aborts start-up if trust-state,
+          trust-score, trust-fill, decision-reason, automation-card,
+          automation-level, automation-explanation, metric-*, step-up-*,
+          sensitive-action, action-status, security-report, or action-result
+          is missing. app.js no longer writes to any of them. This data is
+          only viewable through the bypass-code gated /admin report.
+        -->
+        <aside
+          class="trust-panel"
+          aria-labelledby="trust-title"
+          aria-hidden="true"
+          hidden
+        >
           <div class="trust-header">
             <div>
               <p class="panel-kicker">Session decision</p>
@@ -1251,10 +1305,16 @@
                 <dd id="device-screen">Unavailable</dd>
               </div>
             </dl>
+            <!--
+              Hidden: account.js writes a browser-recognition confidence
+              percentage here, which is a telemetry readout. The rest of the
+              device card (registration, listing, refresh) is untouched.
+            -->
             <p
               class="compact-status"
               id="device-fingerprint-status"
               role="status"
+              hidden
             >
               Optional browser recognition not checked.
             </p>
@@ -1357,7 +1417,13 @@
             </div>
           </article>
 
-          <article class="security-card">
+          <!--
+            Session-consistency card hidden: setup quality, behavioral drift,
+            device confidence, and the AI explanation are all behavioral
+            verdicts. account.js still binds and fills these nodes, so they
+            stay in the DOM; they are simply never shown.
+          -->
+          <article class="security-card" hidden>
             <div class="security-card-header">
               <div>
                 <p class="panel-kicker">Check quality</p>

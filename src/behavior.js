@@ -5,7 +5,7 @@ const MAX_ENROLLMENT_SAMPLES = 50;
 const MAX_FEATURES = 32;
 const MAX_FEATURE_NAME_LENGTH = 64;
 const MAX_ABSOLUTE_FEATURE_VALUE = 1_000_000_000;
-const TEMPLATE_VERSION = 1;
+const TEMPLATE_VERSION = 2;
 
 const FEATURE_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_.-]*$/;
 const FORBIDDEN_FEATURE_NAMES = new Set([
@@ -168,12 +168,39 @@ function effectiveScale(center, deviation) {
   return Math.max(deviation, Math.abs(center) * 0.01, 0.000001);
 }
 
+// A feature that never moved and never had a value across enrollment carried no
+// information. Comparing against it would divide by the 1e-6 scale floor and
+// report an astronomical distance for any real measurement that arrives later,
+// so such features are excluded from scoring until they are adopted.
+function isInertFeature(means, deviations, key) {
+  return means[key] === 0 && deviations[key] === 0;
+}
+
+function activeKeysFrom(featureKeys, means, deviations) {
+  return featureKeys.filter((key) => !isInertFeature(means, deviations, key));
+}
+
+// v1 templates predate activeFeatureKeys and treated every key as comparable.
+function comparableFeatureKeys(template) {
+  return Array.isArray(template.activeFeatureKeys)
+    ? template.activeFeatureKeys
+    : template.featureKeys;
+}
+
 function scaledManhattanDistance(vector, template) {
   const validated = validateFeatureVector(vector, template.featureKeys).vector;
+  const comparableKeys = comparableFeatureKeys(template);
+
+  if (comparableKeys.length === 0) {
+    throw new ValidationError(
+      "The stored template has no comparable features and cannot score a sample.",
+    );
+  }
+
   let distance = 0;
   const contributions = Object.create(null);
 
-  for (const key of template.featureKeys) {
+  for (const key of comparableKeys) {
     const scale = template.scales[key];
     if (typeof scale !== "number" || !Number.isFinite(scale) || scale <= 0) {
       throw new Error(`Stored template has an invalid scale for feature "${key}".`);
@@ -186,7 +213,8 @@ function scaledManhattanDistance(vector, template) {
 
   return {
     distance,
-    normalizedDistance: distance / template.featureKeys.length,
+    normalizedDistance: distance / comparableKeys.length,
+    comparedFeatureCount: comparableKeys.length,
     contributions,
   };
 }
@@ -207,9 +235,17 @@ function createTemplate(samples, options = {}) {
     scales[key] = effectiveScale(center, deviation);
   }
 
+  const activeFeatureKeys = activeKeysFrom(featureKeys, means, deviations);
+  if (activeFeatureKeys.length === 0) {
+    throw new ValidationError(
+      "Enrollment samples carried no measurable signal in any feature.",
+    );
+  }
+
   const draftTemplate = {
     version: TEMPLATE_VERSION,
     featureKeys,
+    activeFeatureKeys,
     means,
     deviations,
     scales,
@@ -313,15 +349,80 @@ function evaluateVector(vector, template) {
     reasonCodes,
     distance: round(result.distance),
     normalizedDistance: round(result.normalizedDistance),
+    comparedFeatureCount: result.comparedFeatureCount,
     policy: {
       allowSensitiveActions: policy.allowSensitiveActions,
       stepUpRequired: policy.stepUpRequired,
       acceptanceDistance: round(
-        policy.acceptanceThreshold * template.featureKeys.length,
+        policy.acceptanceThreshold * result.comparedFeatureCount,
       ),
       stepUpDistance: round(
-        policy.stepUpThreshold * template.featureKeys.length,
+        policy.stepUpThreshold * result.comparedFeatureCount,
       ),
+    },
+  };
+}
+
+// Promotes features that were inert at enrollment but carry real signal in a set
+// of strongly-verified samples. This is how a profile built from one interaction
+// surface (for example pointer-only dashboard use) is later amplified by another
+// (typing), instead of scoring that new signal as an infinite mismatch.
+function adoptFeatures(template, samples, options = {}) {
+  if (!isPlainObject(template)) {
+    throw new ValidationError("A valid enrolled template is required.");
+  }
+
+  if (!Array.isArray(samples) || samples.length < MIN_ENROLLMENT_SAMPLES) {
+    throw new ValidationError(
+      `Feature adoption requires at least ${MIN_ENROLLMENT_SAMPLES} samples.`,
+    );
+  }
+
+  const validatedSamples = samples.map(
+    (sample) => validateFeatureVector(sample, template.featureKeys).vector,
+  );
+  const active = new Set(comparableFeatureKeys(template));
+  const means = { ...template.means };
+  const deviations = { ...template.deviations };
+  const scales = { ...template.scales };
+  const adopted = [];
+
+  for (const key of template.featureKeys) {
+    if (active.has(key)) {
+      continue;
+    }
+
+    const values = validatedSamples.map((sample) => sample[key]);
+    const center = mean(values);
+    const deviation = meanAbsoluteDeviation(values, center);
+
+    // Still nothing to learn from this family in these samples.
+    if (center === 0 && deviation === 0) {
+      continue;
+    }
+
+    means[key] = center;
+    deviations[key] = deviation;
+    scales[key] = effectiveScale(center, deviation);
+    active.add(key);
+    adopted.push(key);
+  }
+
+  if (adopted.length === 0) {
+    return { status: "no_features_adopted", adopted: [], template };
+  }
+
+  return {
+    status: "adopted",
+    adopted,
+    template: {
+      ...template,
+      version: TEMPLATE_VERSION,
+      activeFeatureKeys: template.featureKeys.filter((key) => active.has(key)),
+      means,
+      deviations,
+      scales,
+      updatedAt: options.updatedAt ?? new Date().toISOString(),
     },
   };
 }
@@ -344,7 +445,9 @@ module.exports = {
   MIN_ENROLLMENT_SAMPLES,
   TEMPLATE_VERSION,
   ValidationError,
+  adoptFeatures,
   applyPolicy,
+  comparableFeatureKeys,
   createTemplate,
   evaluateVector,
   mean,

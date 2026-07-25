@@ -37,6 +37,7 @@ const {
 } = require("./src/automation-risk");
 const {
   buildBehaviorDecision,
+  describeFeatureCoverage,
   evaluateCompatibleEvidence,
   reinforceTrustedSample,
 } = require("./src/behavior-lifecycle");
@@ -710,6 +711,7 @@ async function createApp(options = {}) {
           model:
             options.geminiModel
             ?? environment.ODYSSEUS_GEMINI_MODEL,
+          env: environment,
           fetchImpl: options.fetchImpl,
         },
         huggingFace: {
@@ -725,6 +727,7 @@ async function createApp(options = {}) {
               ?? environment.ODYSSEUS_HUGGING_FACE_ALLOWED_HOSTS,
             ),
           ],
+          env: environment,
           fetchImpl: options.fetchImpl,
         },
         notifications: {
@@ -737,7 +740,10 @@ async function createApp(options = {}) {
             options.requiredProviders
             ?? environment.ODYSSEUS_REQUIRED_PROVIDERS,
           ),
-        ].filter((name) => name !== "gemini"),
+        // Neither advisory provider can ever report ready before it has been
+        // called, and neither is called on a request path that readiness gates.
+        // Treating either as required would pin /api/ready at 503 permanently.
+        ].filter((name) => name !== "gemini" && name !== "hugging_face"),
       });
     const turnstileConfigured = (
       providerRuntime.turnstile
@@ -1883,13 +1889,34 @@ async function createApp(options = {}) {
         typingDiagnostics,
         diagnosticRound
       );
+      const featureCoverage = describeFeatureCoverage(
+        profile.template,
+        interactionEvidence ? interactionEvidence.sampleCounts : null,
+      );
+      if (!featureCoverage.sufficient) {
+        result = {
+          ...result,
+          decision: result.decision === "deny" ? "deny" : "step_up",
+          reasonCodes: [
+            "PROFILE_FEATURE_COVERAGE_INSUFFICIENT",
+            ...result.reasonCodes,
+          ],
+          policy: {
+            ...result.policy,
+            allowSensitiveActions: false,
+            stepUpRequired: true,
+          },
+        };
+      }
       let behaviorDecision = buildBehaviorDecision({
         template: profile.template,
-        evidenceStatus: "ready",
+        evidenceStatus: featureCoverage.sufficient
+          ? "ready"
+          : "insufficient_evidence",
         identitySimilarity: result,
         distance: measuredDistance,
-        comparedFeatureNames: profile.template.featureKeys,
-        ignoredFeatureNames: [],
+        comparedFeatureNames: featureCoverage.comparedFeatureNames,
+        ignoredFeatureNames: featureCoverage.ignoredFeatureNames,
         automationRisk: automationAssessment,
         forcedReasonCodes: result.reasonCodes,
       });

@@ -81,8 +81,12 @@
 
   const elements = {};
   const enrollmentSamples = [];
+  const passiveSamples = [];
   let collector = null;
   let authCollector = null;
+  let dashboardCollector = null;
+  let passiveTelemetryInFlight = false;
+  let passiveTelemetryTimer = null;
   let authDiagnostics = null;
   let typingDiagnostics = null;
   let enrolled = false;
@@ -174,11 +178,6 @@
       return;
     }
     if (view === "dashboard") {
-      if (!enrolled) {
-        setAppView("session", "enrollment");
-        elements.enrollmentInput.focus();
-        return;
-      }
       setAppView("dashboard", "dashboard");
       elements.dashboardOverview.focus();
       return;
@@ -256,25 +255,6 @@
     return Math.max(0, Math.min(1, value > 1 ? value / 100 : value));
   }
 
-  function responseReason(result) {
-    const codes = result.reasonCodes || result.reasons;
-    if (Array.isArray(codes) && codes.length) {
-      return codes
-        .map((code) => String(code).replace(/[_-]+/g, " ").toLowerCase())
-        .join(", ");
-    }
-    return result.reason || result.message || "";
-  }
-
-  function readableBehaviorValue(value, fallback) {
-    if (value === null || value === undefined || value === "") {
-      return fallback || "Not assessed";
-    }
-    return String(value)
-      .replace(/[_-]+/g, " ")
-      .replace(/\b\w/g, (character) => character.toUpperCase());
-  }
-
   function behaviorDecisionFrom(value) {
     const source = value && value.body ? value.body : value;
     if (!source || typeof source !== "object") {
@@ -286,26 +266,6 @@
       source.behaviorAssessment ||
       source.error?.behaviorDecision;
     return decision && typeof decision === "object" ? decision : null;
-  }
-
-  function behaviorReasonCodes(decision) {
-    const identity = decision?.identitySimilarity;
-    const automation = decision?.automationRisk;
-    const candidates = [
-      decision?.reasonCodes,
-      decision?.reasons,
-      identity?.reasonCodes,
-      identity?.reasons,
-      automation?.reasonCodes,
-      automation?.reasons,
-    ];
-    const values = [];
-    for (const candidate of candidates) {
-      if (Array.isArray(candidate)) {
-        values.push(...candidate);
-      }
-    }
-    return [...new Set(values.map((value) => String(value)).filter(Boolean))];
   }
 
   function behaviorDecisionAllowsAccess(decision) {
@@ -326,123 +286,17 @@
     ].includes(value);
   }
 
-  function authenticatedBehaviorMessage(username, decision) {
-    if (!decision) {
-      return `Signed in as ${username}.`;
-    }
-    const classification = String(
-      decision.classification || decision.identityClass || ""
-    ).toLowerCase();
-    const amendment = decision.amendment;
-    if (
-      amendment?.applied === true ||
-      amendment?.status === "applied"
-    ) {
-      return `Signed in as ${username}. The trusted match strengthened the saved fingerprint.`;
-    }
-    if (
-      amendment?.status === "candidate_recorded" ||
-      amendment?.status === "pending"
-    ) {
-      return `Signed in as ${username}. The trusted match was recorded as a future fingerprint amendment candidate.`;
-    }
-    if (classification === "baseline_missing") {
-      return `Signed in as ${username}. Complete the account questions to create the first saved fingerprint.`;
-    }
-    if (
-      classification === "trusted_return" ||
-      String(decision.decision || "").toLowerCase() === "allow"
-    ) {
-      return `Signed in as ${username}. Returning behavior matched the saved fingerprint.`;
-    }
-    return `Signed in as ${username}.`;
-  }
+  // The console never states why a sign-in was refused. Every refusal, whether
+  // it came from a credential problem or from a server-side behavioral
+  // decision, reads as the same neutral message. Only the gated /admin report
+  // shows the underlying assessment.
+  const GENERIC_SIGN_IN_FAILURE =
+    "We could not complete this sign-in. Check your details and try again.";
 
-  function showBehaviorWarning(decision) {
-    const identity = decision?.identitySimilarity || {};
-    const automation = decision?.automationRisk || {};
-    const automationClass = String(
-      automation.classification || automation.level || ""
-    ).toLowerCase();
-    const identityClass = String(
-      identity.classification || decision?.classification || ""
-    ).toLowerCase();
-    const reasonCodes = behaviorReasonCodes(decision);
-    const insufficientEvidence = [
-      "baseline_missing",
-      "insufficient_evidence",
-      "more_interaction_required",
-    ].includes(identityClass) || reasonCodes.some((code) => [
-      "BEHAVIOR_EVIDENCE_INSUFFICIENT",
-      "BEHAVIOR_EVIDENCE_REQUIRED",
-      "PROFILE_FEATURE_COVERAGE_INSUFFICIENT",
-    ].includes(String(code).toUpperCase()));
-    const likelyAutomation = automationClass === "automation_likely";
-    const title = insufficientEvidence
-      ? "More natural interaction is required"
-      : likelyAutomation
-        ? "Automated behavior requires review"
-        : "This sign-in did not match safely";
-    const summary = insufficientEvidence
-      ? "The server did not receive enough timing and pointer evidence to compare this sign-in safely. Try again using the form naturally."
-      : likelyAutomation
-        ? "The server detected several automation-like interaction signals and paused access."
-        : "The server found a meaningful difference from the saved account fingerprint and paused access.";
-
-    setText(elements.behaviorWarningTitle, title);
-    setText(elements.behaviorWarningSummary, summary);
-    setText(
-      elements.behaviorWarningIdentity,
-      readableBehaviorValue(
-        identity.classification || identity.decision,
-        "Review required"
-      )
-    );
-    setText(
-      elements.behaviorWarningAutomation,
-      readableBehaviorValue(
-        automation.classification || automation.level,
-        "Not assessed"
-      )
-    );
-    setText(
-      elements.behaviorWarningDecision,
-      readableBehaviorValue(
-        decision?.decision || decision?.outcome,
-        "Access paused"
-      )
-    );
-
-    elements.behaviorWarningReasonList.replaceChildren();
-    const visibleReasons = reasonCodes.length
-      ? reasonCodes
-      : [
-          insufficientEvidence
-            ? "MORE_INTERACTION_REQUIRED"
-            : "BEHAVIORAL_DIFFERENCE_REQUIRES_REVIEW",
-        ];
-    for (const reason of visibleReasons.slice(0, 8)) {
-      const item = global.document.createElement("li");
-      item.textContent = readableBehaviorValue(reason);
-      elements.behaviorWarningReasonList.append(item);
-    }
-
-    const simulated = decision?.simulatedIpRestriction;
-    elements.simulatedIpWarning.hidden = !(
-      simulated &&
-      simulated.displayed === true &&
-      simulated.enforced === false
-    );
-    elements.authPanel.hidden = true;
-    elements.behaviorAccessWarning.hidden = false;
-    const recovery = global.document.getElementById("account-recovery-panel");
-    if (recovery) {
-      recovery.hidden = true;
-    }
-    elements.behaviorAccessWarning.focus();
-  }
-
-  function closeBehaviorWarning() {
+  function restoreAuthPanel(message, state) {
+    // The behavioral review panel and the simulated-restriction notice stay
+    // hidden permanently; they are kept in the DOM only so bindElements() and
+    // the existing login flow keep working.
     elements.behaviorAccessWarning.hidden = true;
     elements.simulatedIpWarning.hidden = true;
     elements.authPanel.hidden = false;
@@ -459,10 +313,23 @@
     elements.authPassword.value = "";
     setInlineStatus(
       elements.authStatus,
-      "Try again naturally, or use another approved account recovery method.",
-      "neutral"
+      message || GENERIC_SIGN_IN_FAILURE,
+      state || "error"
     );
     elements.authUsername.focus();
+  }
+
+  // Kept so the login flow keeps a single stopping point for a refused
+  // sign-in, but it no longer renders any behavioral detail.
+  function showBehaviorWarning(_decision) {
+    restoreAuthPanel(GENERIC_SIGN_IN_FAILURE, "error");
+  }
+
+  function closeBehaviorWarning() {
+    restoreAuthPanel(
+      "Sign in or create a local demo account to unlock the workspace.",
+      "neutral"
+    );
   }
 
   function challengeReferences(mode) {
@@ -766,7 +633,7 @@
     renderChallenge(mode);
     setInlineStatus(
       challengeReferences(mode).status,
-      "Direct browser input is required. Script-dispatched events are not accepted.",
+      "Please type your answer directly in the field.",
       "error"
     );
   }
@@ -815,98 +682,25 @@
     return enrolled && normalizedTrust >= DEFAULT_TRUST_THRESHOLD;
   }
 
-  function updateTrust(nextTrust, allowed, decision) {
+  // Trust, automation risk, and raw signal metrics are collected and sent to
+  // the server exactly as before, but none of them are rendered here. The
+  // functions below stay in place so every existing call site keeps working;
+  // they only maintain internal state and never touch the DOM. The matching
+  // markup is still present but permanently hidden so bindElements() cannot
+  // fail.
+  function updateTrust(nextTrust) {
     const normalized = normalizeTrust(nextTrust);
     if (normalized !== null) {
       trustScore = normalized;
     }
-
-    const percent = Math.round(trustScore * 100);
-    const state =
-      decision ||
-      (percent >= 75 ? "Trusted" : percent >= 60 ? "Review" : "Challenge");
-    setText(elements.trustScore, String(percent));
-    setText(elements.trustState, state);
-
-    if (elements.trustFill) {
-      elements.trustFill.style.width = `${percent}%`;
-      elements.trustFill.parentElement.setAttribute(
-        "aria-valuenow",
-        String(percent)
-      );
-      elements.trustFill.classList.toggle("is-review", percent >= 60 && percent < 75);
-      elements.trustFill.classList.toggle("is-challenge", percent < 60);
-    }
-
-    if (elements.trustState) {
-      elements.trustState.classList.toggle("is-trusted", percent >= 75);
-      elements.trustState.classList.toggle(
-        "is-review",
-        percent >= 60 && percent < 75
-      );
-      elements.trustState.classList.toggle("is-challenge", percent < 60);
-    }
-
-    const canAct = Boolean(allowed);
-    const actionDisabled = !isAuthenticated() || actionInFlight;
-    elements.sensitiveAction.disabled = actionDisabled;
-    elements.sensitiveAction.setAttribute(
-      "aria-disabled",
-      String(actionDisabled)
-    );
-    elements.sensitiveAction.dataset.trustAllowed = String(canAct);
-    if (canAct || !isAuthenticated()) {
-      elements.stepUpWarning.hidden = true;
-    }
   }
 
-  function updateMetrics(vector) {
-    if (!vector) {
-      setText(elements.metricDwell, "0");
-      setText(elements.metricFlight, "0");
-      setText(elements.metricPointer, "0");
-      return;
-    }
-    setText(elements.metricDwell, String(Math.round(vector.dwellMean || 0)));
-    setText(elements.metricFlight, String(Math.round(vector.flightMean || 0)));
-    setText(
-      elements.metricPointer,
-      String(Math.round(vector.pointerVelocityMean || 0))
-    );
+  function updateMetrics(_vector) {
+    // Aggregate keyboard and pointer values are never shown to the user.
   }
 
-  function updateAutomationAssessment(assessment) {
-    const value = assessment && typeof assessment === "object"
-      ? assessment
-      : null;
-    const classification = value?.classification || "insufficient_evidence";
-    const labels = {
-      automation_likely: "High risk",
-      elevated_review: "Review",
-      human_like_interaction: "Low risk",
-      insufficient_evidence: "Not assessed",
-    };
-    const explanations = {
-      automation_likely:
-        "The interaction contains multiple automation-like signals. Password or passkey review is required.",
-      elevated_review:
-        "Some signals merit review, but they do not establish that an agent produced the interaction.",
-      human_like_interaction:
-        "No strong automation pattern was found. This does not prove a human produced the interaction.",
-      insufficient_evidence:
-        "Identity similarity and automation risk are evaluated separately.",
-    };
-    setText(
-      elements.automationLevel,
-      labels[classification] || "Not assessed",
-    );
-    setText(
-      elements.automationExplanation,
-      explanations[classification] || explanations.insufficient_evidence,
-    );
-    if (elements.automationCard) {
-      elements.automationCard.dataset.level = value?.level || "unknown";
-    }
+  function updateAutomationAssessment(_assessment) {
+    // The automation verdict is only viewable through the gated /admin report.
   }
 
   function interactionEvidence(sample) {
@@ -1169,20 +963,11 @@
   }
 
   function updateEnrollmentProgress(count) {
+    // Sample progress is tracked internally only. Showing it would reveal that
+    // a behavioral profile is being built.
     completedEnrollmentSamples = Math.max(
       0,
       Math.min(REQUIRED_ENROLLMENT_SAMPLES, Number(count) || 0)
-    );
-    setText(
-      elements.enrollmentProgressLabel,
-      `${completedEnrollmentSamples} of ${REQUIRED_ENROLLMENT_SAMPLES}`
-    );
-    elements.enrollmentProgress.dataset.complete = String(
-      completedEnrollmentSamples
-    );
-    elements.enrollmentProgress.setAttribute(
-      "aria-valuenow",
-      String(completedEnrollmentSamples)
     );
   }
 
@@ -1380,8 +1165,8 @@
     if (global.OdysseusAccount) {
       global.OdysseusAccount.setAuthenticatedUser(user);
     }
-    restartSessionObserver("unknown");
-    setAppView("session", "unknown");
+    restartSessionObserver("dashboard");
+    setAppView("dashboard", "dashboard");
     setWorkspaceControls();
   }
 
@@ -1509,9 +1294,8 @@
         method: "POST",
         body: payload,
       });
-      const behaviorDecision = behaviorDecisionFrom(result);
-      if (!behaviorDecisionAllowsAccess(behaviorDecision)) {
-        showBehaviorWarning(behaviorDecision);
+      if (!behaviorDecisionAllowsAccess(behaviorDecisionFrom(result))) {
+        showBehaviorWarning();
         return;
       }
       let user = authenticatedUserFrom(result);
@@ -1526,22 +1310,21 @@
         user,
         mode === "register"
           ? `Account created. Signed in as ${user.username}.`
-          : authenticatedBehaviorMessage(user.username, behaviorDecision)
+          : `Signed in as ${user.username}.`
       );
       await hydrateProfile();
       if (isAuthenticated()) {
-        (enrolled
-          ? elements.verificationInput
-          : elements.enrollmentInput
-        ).focus();
+        elements.dashboardOverview.focus();
       }
     } catch (error) {
-      const behaviorDecision = behaviorDecisionFrom(error);
+      const errorCode = String(error.code || "").toUpperCase();
+      // A behavioral refusal must not read differently from any other failed
+      // sign-in, so it never reaches the generic error branch below.
       if (
-        String(error.code).toUpperCase() === "BEHAVIOR_LOGIN_DENIED" &&
-        behaviorDecision
+        errorCode.startsWith("BEHAVIOR_") ||
+        behaviorDecisionFrom(error)
       ) {
-        showBehaviorWarning(behaviorDecision);
+        showBehaviorWarning();
         return;
       }
       setInlineStatus(elements.authStatus, error.message, "error");
@@ -1667,7 +1450,7 @@
     cancelAutoSubmit(mode);
     setInlineStatus(
       output,
-      "Response ready. Keep using the page naturally while the check finishes.",
+      "Response ready. Continuing shortly.",
       "collecting"
     );
   }
@@ -1684,7 +1467,7 @@
       if (enrolled) {
         setInlineStatus(
           elements.enrollmentStatus,
-          "Reset the profile before creating another saved setup.",
+          "Your answers are already saved.",
           "error"
         );
       }
@@ -1693,7 +1476,7 @@
     if (!challengeTasksComplete("enrollment")) {
       setInlineStatus(
         elements.enrollmentStatus,
-        "Finish this response before recording the question.",
+        "Finish your answer before continuing.",
         "error"
       );
       return;
@@ -1706,7 +1489,12 @@
     if (!sample.ok) {
       enrollmentInFlight = false;
       renderChallenge("enrollment");
-      setInlineStatus(elements.enrollmentStatus, sample.reason, "error");
+      // sample.reason describes the collected signal, so it is not surfaced.
+      setInlineStatus(
+        elements.enrollmentStatus,
+        "Please answer that question again.",
+        "error"
+      );
       return;
     }
 
@@ -1719,9 +1507,7 @@
       resetChallenge("enrollment", { advance: true });
       setInlineStatus(
         elements.enrollmentStatus,
-        `Mission complete. ${
-          REQUIRED_ENROLLMENT_SAMPLES - enrollmentSamples.length
-        } missions remaining.`,
+        "Answer saved. Here is the next question.",
         "ready"
       );
       elements.enrollmentInput.focus();
@@ -1731,7 +1517,7 @@
     clearChallengeInputs("enrollment");
     setInlineStatus(
       elements.enrollmentStatus,
-      "Saving the account setup.",
+      "Saving your answers.",
       "working"
     );
 
@@ -1748,38 +1534,99 @@
       updateEnrollmentProgress(
         result.sampleCount ?? REQUIRED_ENROLLMENT_SAMPLES
       );
-      updateTrust(1, true, "Enrolled");
-      setText(
-        elements.decisionReason,
-        responseReason(result) ||
-          "Setup saved. The returning session check is ready."
-      );
+      updateTrust(1);
       setInlineStatus(
         elements.enrollmentStatus,
-        "Security question setup complete.",
+        "Your answers were saved.",
         "ready"
       );
       setWorkspaceControls();
       setAppView("dashboard", "dashboard");
       elements.dashboardOverview.focus();
       if (global.OdysseusAccount) {
-        global.OdysseusAccount.pushNotification(
-          "Saved setup ready",
-          "Five interaction missions were accepted for this profile.",
-          "ready"
-        );
+        // No notification is raised: an account notice about accepted
+        // interaction samples would expose the behavioral profile.
         global.OdysseusAccount.refresh();
       }
     } catch (error) {
       enrollmentSamples.length = 0;
       updateEnrollmentProgress(0);
       resetChallenge("enrollment", { index: 0 });
-      updateTrust(0, false, "Enrollment failed");
+      updateTrust(0);
       handleAuthenticatedError(error, elements.enrollmentStatus);
     } finally {
       enrollmentInFlight = false;
       setWorkspaceControls();
     }
+  }
+
+  function passiveTelemetryTick() {
+    if (
+      !isAuthenticated() ||
+      currentAppView !== "dashboard" ||
+      passiveTelemetryInFlight ||
+      !dashboardCollector
+    ) {
+      return;
+    }
+    if (!dashboardCollector.readiness().ready) {
+      return;
+    }
+    const sample = dashboardCollector.finalize({ reset: true });
+    if (!sample.ok) {
+      return;
+    }
+    const id = profileId();
+    if (!id) {
+      return;
+    }
+
+    passiveTelemetryInFlight = true;
+    (async () => {
+      try {
+        if (!enrolled) {
+          passiveSamples.push(sample.vector);
+          updateEnrollmentProgress(passiveSamples.length);
+          if (passiveSamples.length < REQUIRED_ENROLLMENT_SAMPLES) {
+            return;
+          }
+          const result = await request("/api/enroll", {
+            method: "POST",
+            body: JSON.stringify({
+              profileId: id,
+              samples: passiveSamples.slice(0, REQUIRED_ENROLLMENT_SAMPLES),
+            }),
+          });
+          enrolled = true;
+          passiveSamples.length = 0;
+          updateEnrollmentProgress(
+            result.sampleCount ?? REQUIRED_ENROLLMENT_SAMPLES
+          );
+          updateTrust(1);
+          if (global.OdysseusAccount) {
+            global.OdysseusAccount.refresh();
+          }
+          return;
+        }
+
+        const result = await request("/api/verify", {
+          method: "POST",
+          body: JSON.stringify({
+            profileId: id,
+            vector: sample.vector,
+            interactionEvidence: interactionEvidence(sample),
+          }),
+        });
+        const rawTrust =
+          result.trustScore ?? result.trustPercent ?? result.score ?? trustScore;
+        updateTrust(normalizeTrust(rawTrust) ?? trustScore);
+        updateAutomationAssessment(result.automationAssessment);
+      } catch (_error) {
+        // Passive collection stays silent and just retries on the next tick.
+      } finally {
+        passiveTelemetryInFlight = false;
+      }
+    })();
   }
 
   async function verify(source) {
@@ -1793,7 +1640,7 @@
       if (source === "explicit" && !enrolled) {
         setInlineStatus(
           elements.verificationStatus,
-          "Complete the account questions first.",
+          "Answer the account questions first.",
           "error"
         );
       }
@@ -1808,7 +1655,7 @@
       if (source === "explicit") {
         setInlineStatus(
           elements.verificationStatus,
-          "Finish this response before running the check.",
+          "Finish your answer before continuing.",
           "error"
         );
       }
@@ -1823,7 +1670,12 @@
     const sample = collector.finalize({ reset: true });
     if (!sample.ok) {
       if (source === "explicit") {
-        setInlineStatus(elements.verificationStatus, sample.reason, "error");
+        // sample.reason describes the collected signal, so it is not surfaced.
+        setInlineStatus(
+          elements.verificationStatus,
+          "Please answer that question again.",
+          "error"
+        );
       }
       return;
     }
@@ -1833,7 +1685,7 @@
     renderChallenge("verification");
     setInlineStatus(
       elements.verificationStatus,
-      "Comparing this session with the saved setup.",
+      "Saving your answer.",
       "working"
     );
 
@@ -1855,27 +1707,18 @@
         result.decision || (allowed ? "Trusted" : "Challenge")
       );
 
-      updateTrust(normalized, allowed, decision);
+      updateTrust(normalized);
       updateAutomationAssessment(result.automationAssessment);
-      setText(
-        elements.decisionReason,
-        responseReason(result) || "The current session was compared with the saved setup."
-      );
       setInlineStatus(
         elements.verificationStatus,
-        `Verification complete. Trust is ${Math.round(normalized * 100)}.`,
-        allowed ? "ready" : "error"
+        "Thanks, your answer was recorded.",
+        "ready"
       );
       resetChallenge("verification", { advance: true });
       setAppView("dashboard", "dashboard");
       if (global.OdysseusAccount) {
-        global.OdysseusAccount.pushNotification(
-          allowed ? "Session matched" : "Session review required",
-          `The server returned a trust score of ${Math.round(
-            normalized * 100
-          )}.`,
-          allowed ? "ready" : "error"
-        );
+        // The trust score and decision are deliberately not surfaced as an
+        // account notification; they belong to the gated /admin report only.
         global.OdysseusAccount.refresh();
       }
 
@@ -1891,14 +1734,17 @@
         })
       );
     } catch (error) {
-      updateTrust(trustScore, false, "Unavailable");
-      setText(elements.decisionReason, error.message);
+      updateTrust(trustScore);
       resetChallenge("verification", { advance: true });
-      if (!handleAuthenticatedError(error, elements.verificationStatus)) {
+      if (error.status === 401) {
+        // Only a genuine end-of-session is reported. Any other failure stays
+        // silent so a behavioral refusal is indistinguishable from success.
+        handleAuthenticatedError(error, elements.verificationStatus);
+      } else {
         setInlineStatus(
           elements.verificationStatus,
-          error.message || "Verification could not be completed.",
-          "error"
+          "Thanks, your answer was recorded.",
+          "neutral"
         );
       }
     } finally {
@@ -1917,14 +1763,10 @@
       collector.reset();
     }
     updateEnrollmentProgress(0);
-    updateTrust(0, false, "Not evaluated");
+    updateTrust(0);
     updateMetrics(null);
     updateAutomationAssessment(null);
     resetAllChallenges();
-    setText(
-      elements.decisionReason,
-      "Complete enrollment and a verification mission to calculate trust."
-    );
     setText(elements.actionResult, "");
     elements.actionResult.removeAttribute("data-state");
     setText(elements.actionStatus, "");
@@ -1950,7 +1792,7 @@
     if (!id) {
       setInlineStatus(
         elements.enrollmentStatus,
-        "Enter a profile ID to create or restore a saved setup.",
+        "Enter a profile ID to continue.",
         "neutral"
       );
       return;
@@ -1958,7 +1800,7 @@
 
     setInlineStatus(
       elements.enrollmentStatus,
-      "Checking for an existing setup.",
+      "Loading your account.",
       "working"
     );
 
@@ -1978,7 +1820,7 @@
         setAppView("session", "enrollment");
         setInlineStatus(
           elements.enrollmentStatus,
-          "No saved setup found. Ready for the first check-in.",
+          "Ready when you are.",
           "neutral"
         );
         return;
@@ -1989,20 +1831,12 @@
       updateEnrollmentProgress(
         result.sampleCount ?? REQUIRED_ENROLLMENT_SAMPLES
       );
-      updateTrust(0, false, "Ready to verify");
+      updateTrust(0);
       setWorkspaceControls();
-      setText(
-        elements.decisionReason,
-        result.enrolledAt
-          ? `Existing setup from ${new Date(
-              result.enrolledAt
-            ).toLocaleString()} is ready. Complete a verification mission.`
-          : "Existing setup restored. Complete a returning session check."
-      );
       setInlineStatus(
         elements.enrollmentStatus,
-        "Existing setup restored.",
-        "ready"
+        "Ready when you are.",
+        "neutral"
       );
     } catch (error) {
       if (sequence !== hydrationSequence) {
@@ -2023,7 +1857,7 @@
     elements.resetProfile.disabled = true;
     setInlineStatus(
       elements.enrollmentStatus,
-      "Removing the saved setup.",
+      "Removing your saved answers.",
       "working"
     );
     try {
@@ -2034,7 +1868,7 @@
       resetLocalState();
       setInlineStatus(
         elements.enrollmentStatus,
-        "Profile reset. Ready for the first mission.",
+        "Profile reset. Ready when you are.",
         "ready"
       );
       elements.enrollmentInput.focus();
@@ -2054,7 +1888,7 @@
     updateMetrics(null);
     setInlineStatus(
       elements.verificationStatus,
-      "Verification mission restarted.",
+      "Question restarted.",
       "neutral"
     );
     elements.verificationInput.focus();
@@ -3166,8 +3000,17 @@
         );
       },
     });
+    dashboardCollector = global.OdysseusTelemetry.createCollector({
+      pointerTarget: elements.dashboardOverview,
+      minimumDwellSamples: 0,
+      minimumFlightSamples: 0,
+      minimumDownDownSamples: 0,
+      minimumPointerSamples: 12,
+    });
     authCollector.start();
     collector.start();
+    dashboardCollector.start();
+    passiveTelemetryTimer = global.setInterval(passiveTelemetryTick, 5000);
     sessionObserver = global.OdysseusSession.createObserver(global);
     setAppView("login", "login");
 

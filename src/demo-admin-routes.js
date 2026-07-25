@@ -1,6 +1,8 @@
 "use strict";
 
 const {
+  adoptFeatures,
+  comparableFeatureKeys,
   evaluateVector,
   scaledManhattanDistance,
   validateFeatureVector,
@@ -61,17 +63,33 @@ function round(value, places = 6) {
   return Math.round((numeric + Number.EPSILON) * factor) / factor;
 }
 
+// Features that carried no enrollment signal are stored but not scored. The
+// report names them so a pointer-only baseline reads as partially measured
+// rather than silently complete.
+function comparableKeySet(template) {
+  const comparable = comparableFeatureKeys(template);
+  return new Set(
+    Array.isArray(comparable)
+      ? comparable
+      : Array.isArray(template.featureKeys)
+        ? template.featureKeys
+        : [],
+  );
+}
+
 function profileFingerprint(profile, index, username) {
   const template = profile.template;
   const featureKeys = Array.isArray(template.featureKeys)
     ? template.featureKeys
     : [];
+  const comparableKeys = comparableKeySet(template);
   return {
     reportLabel: `Report ${index + 1}`,
     subjectLabel: username,
     profileId: profile.profileId,
     sampleCount: profile.sampleCount,
     featureCount: profile.featureCount,
+    activeFeatureCount: comparableKeys.size,
     enrolledAt: profile.enrolledAt,
     updatedAt: profile.updatedAt,
     templateVersion: profile.templateVersion,
@@ -102,6 +120,7 @@ function profileFingerprint(profile, index, username) {
       : null,
     features: featureKeys.map((name) => ({
       name,
+      comparable: comparableKeys.has(name),
       baselineCenter: round(template.means?.[name]),
       normalVariation: round(template.deviations?.[name]),
       normalizationScale: round(template.scales?.[name]),
@@ -253,6 +272,12 @@ function strongTestReport(event, index) {
     amendment: isPlainObject(report.amendment)
       ? report.amendment
       : null,
+    adoption: isPlainObject(report.adoption)
+      ? report.adoption
+      : null,
+    adoptedFeatures: Array.isArray(report.adoptedFeatures)
+      ? report.adoptedFeatures
+      : [],
     featureSummary: Array.isArray(report.featureSummary)
       ? report.featureSummary
       : [],
@@ -586,6 +611,7 @@ function evaluateStrongTest(profile, body, context) {
   const maximumAutomationRisk = Math.max(
     ...evaluated.map((sample) => sample.automation.riskScore),
   );
+  const comparableKeys = comparableKeySet(profile.template);
   const featureSummary = profile.template.featureKeys.map((name) => {
     const currentAverage = average(
       evaluated.map((sample) => sample.vector[name]),
@@ -593,6 +619,7 @@ function evaluateStrongTest(profile, body, context) {
     const baselineCenter = Number(profile.template.means[name]);
     return {
       name,
+      comparable: comparableKeys.has(name),
       currentAverage: round(currentAverage),
       baselineCenter: round(baselineCenter),
       difference: round(currentAverage - baselineCenter),
@@ -623,6 +650,7 @@ function evaluateStrongTest(profile, body, context) {
       meanTrustPercent,
       meanNormalizedDistance,
       acceptanceThreshold: round(profile.template.acceptanceThreshold),
+      comparedFeatureCount: comparableKeys.size,
     },
     automationRisk: {
       classification: automationClassification,
@@ -638,6 +666,7 @@ function evaluateStrongTest(profile, body, context) {
       "The admin subject label is evaluation metadata and does not affect any score.",
       "This local test does not issue a login or sensitive-action grant.",
       "Only close, sufficiently evidenced, human-like samples may strengthen the saved baseline.",
+      "Adoption only measures families the enrollment never captured; it never relaxes a family the baseline already scores.",
     ],
   };
 }
@@ -738,11 +767,10 @@ function registerDemoAdminRoutes(app, suppliedContext) {
         );
       }
       const testReport = evaluateStrongTest(profile, body, context);
-      const eligibleSamples = (
+      // Nothing reaches the stored profile unless every sample looks human and
+      // carries enough signal to be worth learning from.
+      const trustedSamples = (
         testReport.samples.every(
-          (sample) => sample.decision === "allow",
-        )
-        && testReport.samples.every(
           (sample) =>
             sample.automationRisk?.classification
             === "human_like_interaction",
@@ -751,6 +779,22 @@ function registerDemoAdminRoutes(app, suppliedContext) {
           (sample) => sample.evidenceSufficient === true,
         )
       );
+      // Drift and adoption warrant different identity bars. Drift rewrites a
+      // baseline that already exists, so it demands a clean match. Adoption
+      // only ever writes families that were inert, where there is no stored
+      // baseline to match against — holding it to the same bar would throw away
+      // a legitimate amplification whenever the session merely drifted. A
+      // rejected identity still blocks both.
+      const eligibleForDrift = trustedSamples && testReport.samples.every(
+        (sample) => sample.decision === "allow",
+      );
+      const eligibleForAdoption = trustedSamples && testReport.samples.every(
+        (sample) => sample.decision !== "deny",
+      );
+      const eligibleSamples = eligibleForDrift || eligibleForAdoption;
+      const previousActiveFeatureCount = comparableKeySet(
+        profile.template,
+      ).size;
       let amendment = {
         status: "not_applied",
         reasonCode: eligibleSamples
@@ -758,6 +802,13 @@ function registerDemoAdminRoutes(app, suppliedContext) {
           : "UNTRUSTED_ADMIN_TEST_SAMPLES_NOT_APPLIED",
         previousSampleCount: profile.template.sampleCount,
         sampleCount: profile.template.sampleCount,
+      };
+      let adoption = {
+        status: "not_applied",
+        reasonCode: "UNTRUSTED_ADMIN_TEST_SAMPLES_NOT_ADOPTED",
+        adoptedFeatures: [],
+        previousActiveFeatureCount,
+        activeFeatureCount: previousActiveFeatureCount,
       };
       if (eligibleSamples) {
         const updateTimestamp = new Date().toISOString();
@@ -769,16 +820,26 @@ function registerDemoAdminRoutes(app, suppliedContext) {
             profile.template.featureKeys,
           ).vector,
         }));
-        const evolved = evolveTemplate(
-          profile.template,
-          candidates,
-          {
-            minimumSessions: STRONG_TEST_SAMPLE_COUNT,
-            maximumSessions: STRONG_TEST_SAMPLE_COUNT,
-            maxDistanceRatio: 1,
-            updatedAt: updateTimestamp,
-          },
-        );
+        const evolved = eligibleForDrift
+          ? evolveTemplate(
+            profile.template,
+            candidates,
+            {
+              minimumSessions: STRONG_TEST_SAMPLE_COUNT,
+              maximumSessions: STRONG_TEST_SAMPLE_COUNT,
+              maxDistanceRatio: 1,
+              updatedAt: updateTimestamp,
+            },
+          )
+          : {
+            update: {
+              status: "not_applied",
+              reasonCode: "IDENTITY_DRIFT_PRESENT_DRIFT_NOT_APPLIED",
+              acceptedSessionIds: [],
+              rejectedSessions: [],
+            },
+            template: profile.template,
+          };
         amendment = evolved.update.status === "updated"
           ? {
             status: "applied",
@@ -801,15 +862,58 @@ function registerDemoAdminRoutes(app, suppliedContext) {
             acceptedSessionIds: evolved.update.acceptedSessionIds,
             rejectedSessions: evolved.update.rejectedSessions,
           };
-        if (amendment.status === "applied") {
+        // Drift and adoption answer different questions. Drift refines the
+        // families the baseline already scores; adoption promotes families that
+        // were inert at enrollment, which scoring now skips entirely. Without
+        // it, real typing supplied to a pointer-only baseline is measured
+        // against nothing and the amplification is silently lost. Both draw
+        // only from these samples, which already cleared the identity,
+        // automation, and evidence-sufficiency requirements above.
+        const driftedTemplate = amendment.status === "applied"
+          ? evolved.template
+          : profile.template;
+        const adopted = evolved.update.status === "blocked"
+          ? {
+            status: "no_features_adopted",
+            adopted: [],
+            template: driftedTemplate,
+          }
+          : adoptFeatures(
+            driftedTemplate,
+            candidates.map((candidate) => candidate.vector),
+            { updatedAt: updateTimestamp },
+          );
+        adoption = adopted.status === "adopted"
+          ? {
+            status: "applied",
+            reasonCode: "INERT_FEATURE_FAMILIES_ADOPTED",
+            adoptedFeatures: adopted.adopted,
+            previousActiveFeatureCount,
+            activeFeatureCount: comparableKeySet(adopted.template).size,
+          }
+          : {
+            status: "not_applied",
+            reasonCode: evolved.update.status === "blocked"
+              ? evolved.update.reasonCode
+              : "NO_INERT_FEATURES_WITH_NEW_SIGNAL",
+            adoptedFeatures: [],
+            previousActiveFeatureCount,
+            activeFeatureCount: previousActiveFeatureCount,
+          };
+        if (
+          amendment.status === "applied"
+          || adoption.status === "applied"
+        ) {
           await context.database.setProfile(
             user.id,
             profileId,
-            evolved.template,
+            adopted.template,
           );
         }
       }
       testReport.amendment = amendment;
+      testReport.adoption = adoption;
+      testReport.adoptedFeatures = adoption.adoptedFeatures;
       const auditEvent = await context.appendAudit({
         userId: user.id,
         eventType: "demo_admin.behavior_test",
@@ -819,6 +923,7 @@ function registerDemoAdminRoutes(app, suppliedContext) {
           demoSubjectLabel: testReport.subjectLabel,
           testReport,
           amendment,
+          adoption,
         },
       }, request);
       response.set("Cache-Control", "no-store");

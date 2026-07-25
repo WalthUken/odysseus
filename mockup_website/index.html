@@ -146,8 +146,20 @@
                 </div>
             </section>
 
+            <!-- Recent Orders -->
+            <section class="glass-panel orders-container dashboard-anim delay-3" aria-labelledby="recent-orders-heading">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h3 id="recent-orders-heading">Recent orders</h3>
+                    <span class="orders-count" id="orders-count" aria-hidden="true"></span>
+                </div>
+                <ul class="orders-list" id="recent-orders-list" aria-live="polite">
+                    <!-- Populated via JS -->
+                </ul>
+                <p class="orders-empty" id="orders-empty">No orders yet. Open a symbol to place your first order.</p>
+            </section>
+
             <!-- Options Chain Preview -->
-            <section class="glass-panel table-container dashboard-anim delay-3">
+            <section class="glass-panel table-container dashboard-anim delay-4">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
                     <h3>Most Active Options</h3>
                     <button class="btn btn-primary" style="padding: 0.5rem 1rem; font-size: 0.875rem;">View Full Chain</button>
@@ -171,6 +183,66 @@
             </section>
         </main>
     </div>
+
+    <!-- Ticker detail + order ticket modal -->
+    <div class="modal-overlay" id="ticker-modal" hidden>
+        <div class="modal-panel glass-panel" role="dialog" aria-modal="true" aria-labelledby="ticker-modal-title" aria-describedby="ticker-modal-subtitle">
+            <button type="button" class="modal-close" id="ticker-modal-close" aria-label="Close details">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+
+            <div class="modal-head">
+                <div>
+                    <h2 class="modal-symbol" id="ticker-modal-title">—</h2>
+                    <p class="modal-name" id="ticker-modal-subtitle">—</p>
+                </div>
+                <div class="modal-price-block">
+                    <div class="modal-price" id="ticker-modal-price">—</div>
+                    <div class="stock-change" id="ticker-modal-change"></div>
+                </div>
+            </div>
+
+            <div class="modal-stats" id="ticker-modal-stats">
+                <!-- Populated via JS -->
+            </div>
+
+            <div class="modal-chart-wrap">
+                <div class="modal-chart-title" id="ticker-modal-chart-title">Price history (90 sessions)</div>
+                <div style="position: relative; height: 220px; width: 100%;">
+                    <canvas id="detailChart" aria-label="Price history chart" role="img"></canvas>
+                </div>
+            </div>
+
+            <form class="order-ticket" id="order-ticket" novalidate aria-labelledby="order-ticket-heading">
+                <h3 id="order-ticket-heading" class="order-ticket-heading">Order ticket</h3>
+
+                <div class="order-side" role="group" aria-label="Order side">
+                    <button type="button" class="order-side-btn is-active" id="order-side-buy" data-side="buy" aria-pressed="true">Buy</button>
+                    <button type="button" class="order-side-btn" id="order-side-sell" data-side="sell" aria-pressed="false">Sell</button>
+                </div>
+
+                <div class="order-fields">
+                    <div class="input-group order-field">
+                        <label for="order-quantity">Quantity</label>
+                        <input type="number" id="order-quantity" name="order-quantity" min="1" step="1" inputmode="numeric" placeholder="0" autocomplete="off">
+                    </div>
+                    <div class="input-group order-field">
+                        <label for="order-limit">Limit price ($)</label>
+                        <input type="number" id="order-limit" name="order-limit" min="0" step="0.01" inputmode="decimal" placeholder="0.00" autocomplete="off">
+                    </div>
+                </div>
+
+                <div class="order-estimate">
+                    <span>Estimated total</span>
+                    <strong id="order-estimate-total" aria-live="polite">$0.00</strong>
+                </div>
+
+                <button type="submit" class="btn btn-primary order-submit" id="order-submit">Place order</button>
+                <p class="order-confirmation" id="order-confirmation" role="status" aria-live="polite" hidden></p>
+            </form>
+        </div>
+    </div>
+
     <script src="app.js"></script>
 </body>
 </html>

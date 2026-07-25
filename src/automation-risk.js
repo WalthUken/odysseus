@@ -10,6 +10,45 @@ const MAX_SESSION_DISTANCE_PX = 1_000_000_000;
 const MAX_SESSION_VIEWS = 16;
 const MAX_SESSION_SCALE = 10;
 const MIN_SESSION_SCALE = 0.1;
+const MAX_RISK_SCORE = 100;
+const ELEVATED_REVIEW_RATIO = 0.4;
+const AUTOMATION_LIKELY_RATIO = 0.7;
+const KEYBOARD_FEATURE_NAMES = [
+  "dwellMean",
+  "dwellDeviation",
+  "flightMean",
+  "flightDeviation",
+  "downDownMean",
+  "downDownDeviation",
+];
+const POINTER_FEATURE_NAMES = [
+  "pointerVelocityMean",
+  "pointerVelocityDeviation",
+  "pointerAccelerationMean",
+  "pointerAccelerationDeviation",
+  "pointerJitterMean",
+  "pointerJitterDeviation",
+];
+// A verdict needs a body of checks behind it. When almost nothing was
+// attainable, the few always-firing bookkeeping signals must not read as a
+// confident automation finding.
+const MINIMUM_ATTAINABLE_WEIGHT = 40;
+// A hand never draws a perfectly straight line, never holds one speed, and
+// never travels without accelerating, so each floor sits far below the values a
+// trackpad, stylus, or assistive pointer produces.
+const POINTER_JITTER_FLOOR = 0.01;
+// Travel interpolated between waypoints hides inside the mean: nearly every
+// sample turns by nothing and the few that turn do so abruptly, so direction
+// change spreads far wider than it averages. A hand curves continuously, so its
+// spread stays close to its mean however gentle the hardware is.
+const POINTER_WAYPOINT_JITTER_MEAN = 0.1;
+const POINTER_WAYPOINT_JITTER_VARIATION = 2;
+const POINTER_VELOCITY_VARIATION_FLOOR = 0.05;
+const POINTER_ACCELERATION_FLOOR = 20;
+const POINTER_VELOCITY_CEILING = 8_000;
+const POINTER_REGULARITY_VELOCITY_VARIATION = 0.15;
+const POINTER_REGULARITY_VELOCITY_DEVIATION = 30;
+const POINTER_REGULARITY_JITTER_DEVIATION = 0.05;
 const SESSION_VIEW_NAMES = new Set([
   "login",
   "enrollment",
@@ -477,9 +516,38 @@ function ratio(deviation, center) {
   return Math.abs(normalizedDeviation / normalizedCenter);
 }
 
+function hasActiveFeature(vector, names) {
+  if (!isPlainObject(vector)) {
+    return false;
+  }
+  return names.some((name) => {
+    const value = finite(vector[name]);
+    return value !== null && value !== 0;
+  });
+}
+
+function keyboardSampleTotal(evidence) {
+  if (!evidence || !isPlainObject(evidence.sampleCounts)) {
+    return 0;
+  }
+  return ["dwell", "flight", "downDown"].reduce((total, name) => {
+    const value = finite(evidence.sampleCounts[name]);
+    return total + (value === null ? 0 : value);
+  }, 0);
+}
+
+function pointerSampleTotal(evidence) {
+  if (!evidence || !isPlainObject(evidence.sampleCounts)) {
+    return 0;
+  }
+  const value = finite(evidence.sampleCounts.pointer);
+  return value === null ? 0 : value;
+}
+
 function assessAutomationRisk(vector, diagnostics, evidence) {
   const signals = [];
   let score = 0;
+  let attainable = 0;
 
   function add(code, points, detail) {
     if (signals.some((signal) => signal.code === code)) {
@@ -493,17 +561,63 @@ function assessAutomationRisk(vector, diagnostics, evidence) {
     });
   }
 
+  // Records the weight of a check the sample's own evidence could have tripped,
+  // whether or not it did. Checks that no amount of automation could have
+  // triggered here, because the underlying evidence is absent, are left out so
+  // a pointer-only window is not measured against keyboard-only checks.
+  function attainableWeight(points) {
+    attainable += points;
+  }
+
+  const normalizedEvidence = evidence || null;
+  const keyboardFeaturesPresent = hasActiveFeature(
+    vector,
+    KEYBOARD_FEATURE_NAMES,
+  );
+  const pointerFeaturesPresent = hasActiveFeature(
+    vector,
+    POINTER_FEATURE_NAMES,
+  );
+  const keyboardSamples = keyboardSampleTotal(normalizedEvidence);
+  const typingExpected = keyboardFeaturesPresent || keyboardSamples > 0;
+
   if (!diagnostics) {
-    add(
-      "TYPING_DIAGNOSTICS_MISSING",
-      12,
-      "The client did not provide the optional aggregate typing diagnostic.",
-    );
+    // A passively collected pointer-only window carries no typing at all, so a
+    // missing typing diagnostic is only a signal when typing was expected.
+    if (typingExpected) {
+      attainableWeight(12);
+      add(
+        "TYPING_DIAGNOSTICS_MISSING",
+        12,
+        "The client did not provide the optional aggregate typing diagnostic.",
+      );
+    }
   } else {
     const durationMs = finite(diagnostics.totalDurationMs);
     const cadencePerMinute = finite(diagnostics.cadencePerMinute);
     const inputEventCount = finite(diagnostics.inputEventCount);
     const keyPressCount = finite(diagnostics.keyPressCount);
+
+    if (durationMs !== null) {
+      attainableWeight(48);
+    }
+    if (cadencePerMinute !== null) {
+      attainableWeight(42);
+    }
+    if (
+      durationMs !== null
+      && inputEventCount !== null
+      && inputEventCount > 0
+    ) {
+      attainableWeight(50);
+    }
+    if (
+      keyPressCount !== null
+      && inputEventCount !== null
+      && inputEventCount > 0
+    ) {
+      attainableWeight(24);
+    }
 
     if (durationMs !== null && durationMs < 1_200) {
       add(
@@ -558,14 +672,15 @@ function assessAutomationRisk(vector, diagnostics, evidence) {
     }
   }
 
-  const normalizedEvidence = evidence || null;
   if (!normalizedEvidence) {
+    attainableWeight(8);
     add(
       "BROWSER_INTEGRITY_EVIDENCE_MISSING",
       8,
       "No browser event-integrity summary accompanied the sample.",
     );
   } else {
+    attainableWeight(40);
     if (normalizedEvidence.trustedEventsRequired !== true) {
       add(
         "TRUSTED_EVENTS_NOT_REQUIRED",
@@ -573,6 +688,7 @@ function assessAutomationRisk(vector, diagnostics, evidence) {
         "The browser reported that trusted input events were not required.",
       );
     }
+    attainableWeight(55);
     if (normalizedEvidence.rejectedSyntheticEvents > 0) {
       add(
         "SYNTHETIC_EVENTS_OBSERVED",
@@ -580,6 +696,7 @@ function assessAutomationRisk(vector, diagnostics, evidence) {
         "The browser rejected one or more script-dispatched input events.",
       );
     }
+    attainableWeight(28);
     if (
       normalizedEvidence.durationMs > 0
       && normalizedEvidence.durationMs < 1_000
@@ -592,6 +709,7 @@ function assessAutomationRisk(vector, diagnostics, evidence) {
     }
     const sessionAggregate = normalizedEvidence.sessionAggregate;
     if (sessionAggregate) {
+      attainableWeight(8);
       if (
         sessionAggregate.elapsedMs + 250
         < normalizedEvidence.durationMs
@@ -601,6 +719,9 @@ function assessAutomationRisk(vector, diagnostics, evidence) {
           8,
           "Whole-session elapsed time was shorter than the sample window.",
         );
+      }
+      if (keyboardSamples > 0 || diagnostics) {
+        attainableWeight(8);
       }
       if (
         sessionAggregate.keyboard.keyDownEvents
@@ -617,6 +738,9 @@ function assessAutomationRisk(vector, diagnostics, evidence) {
           "Whole-session keyboard counts were lower than challenge counts.",
         );
       }
+      if (pointerSampleTotal(normalizedEvidence) > 0) {
+        attainableWeight(8);
+      }
       if (
         sessionAggregate.pointer.moveEvents
         < normalizedEvidence.sampleCounts.pointer
@@ -626,6 +750,13 @@ function assessAutomationRisk(vector, diagnostics, evidence) {
           8,
           "Whole-session pointer counts were lower than challenge counts.",
         );
+      }
+      if (
+        diagnostics
+        && diagnostics.version === 2
+        && diagnostics.corrections
+      ) {
+        attainableWeight(8);
       }
       if (
         diagnostics
@@ -645,6 +776,9 @@ function assessAutomationRisk(vector, diagnostics, evidence) {
 
   if (isPlainObject(vector)) {
     const dwellMean = finite(vector.dwellMean);
+    if (dwellMean !== null && dwellMean > 0) {
+      attainableWeight(32);
+    }
     if (dwellMean !== null && dwellMean > 0 && dwellMean < 12) {
       add(
         "IMPLAUSIBLE_KEY_HOLD",
@@ -658,6 +792,9 @@ function assessAutomationRisk(vector, diagnostics, evidence) {
       ratio(vector.flightDeviation, vector.flightMean),
       ratio(vector.downDownDeviation, vector.downDownMean),
     ].filter((value) => value !== null);
+    if (regularityRatios.length > 0) {
+      attainableWeight(28);
+    }
     const highlyRegular = regularityRatios.filter((value) => value < 0.015);
     if (highlyRegular.length >= 2) {
       add(
@@ -673,35 +810,131 @@ function assessAutomationRisk(vector, diagnostics, evidence) {
       );
     }
 
+    const pointerVelocityMean = finite(vector.pointerVelocityMean);
     const pointerVelocityDeviation = finite(
       vector.pointerVelocityDeviation,
     );
+    const pointerAccelerationMean = finite(vector.pointerAccelerationMean);
+    const pointerJitterMean = finite(vector.pointerJitterMean);
     const pointerJitterDeviation = finite(vector.pointerJitterDeviation);
-    if (
-      pointerVelocityDeviation !== null
-      && pointerJitterDeviation !== null
-      && pointerVelocityDeviation < 1
-      && pointerJitterDeviation < 0.002
-    ) {
-      add(
-        "ROBOTIC_POINTER_REGULARITY",
-        24,
-        "Pointer velocity and direction-change variation were both very low.",
-      );
+    const pointerVelocityVariation = ratio(
+      vector.pointerVelocityDeviation,
+      vector.pointerVelocityMean,
+    );
+    const pointerJitterVariation = ratio(
+      vector.pointerJitterDeviation,
+      vector.pointerJitterMean,
+    );
+
+    // Pointer-native checks only apply once the window actually contains
+    // pointer travel. An all-zero pointer block means the person never moved a
+    // pointer, not that a machine moved it perfectly.
+    if (pointerFeaturesPresent) {
+      if (pointerJitterMean !== null) {
+        attainableWeight(44);
+        if (pointerJitterMean < POINTER_JITTER_FLOOR) {
+          add(
+            "POINTER_PATH_WITHOUT_CURVATURE",
+            44,
+            "Pointer travel showed almost no direction change, as a drawn line does.",
+          );
+        } else if (
+          pointerJitterMean < POINTER_WAYPOINT_JITTER_MEAN
+          && pointerJitterVariation !== null
+          && pointerJitterVariation > POINTER_WAYPOINT_JITTER_VARIATION
+        ) {
+          add(
+            "POINTER_WAYPOINT_TRAVEL",
+            40,
+            "Pointer travel ran straight between rare abrupt turns, as interpolation from one target to the next does.",
+          );
+        }
+      }
+      if (pointerVelocityVariation !== null) {
+        attainableWeight(30);
+        if (pointerVelocityVariation < POINTER_VELOCITY_VARIATION_FLOOR) {
+          add(
+            "POINTER_VELOCITY_WITHOUT_VARIATION",
+            30,
+            "Pointer speed held almost constant across the whole window.",
+          );
+        }
+      }
+      if (pointerAccelerationMean !== null) {
+        attainableWeight(28);
+        if (pointerAccelerationMean < POINTER_ACCELERATION_FLOOR) {
+          add(
+            "POINTER_WITHOUT_ACCELERATION_PROFILE",
+            28,
+            "Pointer travel showed no measurable acceleration or deceleration.",
+          );
+        }
+      }
+      if (pointerVelocityMean !== null) {
+        attainableWeight(40);
+        if (pointerVelocityMean > POINTER_VELOCITY_CEILING) {
+          add(
+            "IMPLAUSIBLE_POINTER_VELOCITY",
+            40,
+            "Average pointer speed was faster than a hand can sustain.",
+          );
+        }
+      }
+      if (
+        pointerJitterDeviation !== null
+        && (
+          pointerVelocityDeviation !== null
+          || pointerVelocityVariation !== null
+        )
+      ) {
+        attainableWeight(28);
+        const steadyVelocity = (
+          pointerVelocityVariation !== null
+          && pointerVelocityVariation < POINTER_REGULARITY_VELOCITY_VARIATION
+        ) || (
+          pointerVelocityDeviation !== null
+          && pointerVelocityDeviation < POINTER_REGULARITY_VELOCITY_DEVIATION
+        );
+        if (
+          steadyVelocity
+          && pointerJitterDeviation < POINTER_REGULARITY_JITTER_DEVIATION
+        ) {
+          add(
+            "ROBOTIC_POINTER_REGULARITY",
+            28,
+            "Pointer velocity and direction-change variation were both very low.",
+          );
+        }
+      }
     }
   }
 
-  score = Math.max(0, Math.min(100, score));
+  // Two readings of the same score: against the weight this sample could
+  // actually have attained, and against the established fixed scale. The
+  // sharper of the two decides, so a sparse window is judged on the evidence it
+  // could carry rather than on checks it had no way to trip, while a richly
+  // evidenced sample never becomes harder to flag merely because more checks
+  // were available to it.
+  const attainableRatio = score / Math.max(
+    attainable,
+    MINIMUM_ATTAINABLE_WEIGHT,
+  );
+  const fixedScaleRatio = score / MAX_RISK_SCORE;
+  const normalizedScore = Math.max(
+    0,
+    Math.min(1, Math.max(attainableRatio, fixedScaleRatio)),
+  );
+  const riskScore = Math.round(normalizedScore * MAX_RISK_SCORE);
   const evidenceAvailable = Boolean(diagnostics || normalizedEvidence);
   let classification = "human_like_interaction";
   let level = "low";
   if (!evidenceAvailable) {
     classification = "insufficient_evidence";
     level = "unknown";
-  } else if (score >= 70) {
+  } else if (normalizedScore >= AUTOMATION_LIKELY_RATIO) {
     classification = "automation_likely";
     level = "high";
-  } else if (score >= 40) {
+  } else if (normalizedScore >= ELEVATED_REVIEW_RATIO) {
     classification = "elevated_review";
     level = "elevated";
   }
@@ -710,7 +943,7 @@ function assessAutomationRisk(vector, diagnostics, evidence) {
     version: 1,
     classification,
     level,
-    riskScore: score,
+    riskScore,
     reasonCodes: signals.map((signal) => signal.code),
     signals,
     grantRestrictionRecommended: classification === "automation_likely",
