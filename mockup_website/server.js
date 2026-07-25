@@ -376,6 +376,48 @@ for (const role of ["baseline", "sample"]) {
   });
 }
 
+// The typing test on the admin page: ten sentences of dense keystroke timing.
+app.post("/api/behavior/enhanced", async (request, response) => {
+  const key = behaviorKey(request.body?.username);
+  const profile = request.body?.profile;
+
+  if (!key) {
+    response.status(400).json({ error: "Enter an account username" });
+    return;
+  }
+  if (
+    !profile
+    || typeof profile !== "object"
+    || !Array.isArray(profile.perRound)
+    || profile.perRound.length === 0
+    || typeof profile.holdMs !== "object"
+  ) {
+    response.status(400).json({ error: "The typing test was incomplete" });
+    return;
+  }
+
+  try {
+    await queueBehavior(async () => {
+      const profiles = await readBehavior();
+      const stored = profiles[key] || {};
+      stored.enhanced = {
+        capturedAt: new Date().toISOString(),
+        profile,
+      };
+      profiles[key] = stored;
+      await writeBehavior(profiles);
+    });
+    response.status(201).json({
+      username: key,
+      rounds: profile.perRound.length,
+      keystrokes: profile.keystrokes,
+    });
+  } catch (error) {
+    console.error("could not store the enhanced profile", error);
+    response.status(500).json({ error: "The profile could not be saved" });
+  }
+});
+
 app.get("/api/behavior/report", async (request, response) => {
   const key = behaviorKey(request.query.username);
   if (!key) {
@@ -386,7 +428,7 @@ app.get("/api/behavior/report", async (request, response) => {
   try {
     const profiles = await readBehavior();
     const profile = profiles[key];
-    if (!profile || !profile.baseline) {
+    if (!profile || (!profile.baseline && !profile.enhanced)) {
       response.status(404).json({
         error: "No real-user extract is saved for that account yet",
       });
@@ -395,9 +437,10 @@ app.get("/api/behavior/report", async (request, response) => {
 
     response.json({
       username: key,
-      baseline: profile.baseline,
+      baseline: profile.baseline || null,
       sample: profile.sample || null,
-      comparison: profile.sample
+      enhanced: profile.enhanced || null,
+      comparison: profile.baseline && profile.sample
         ? compare(profile.baseline, profile.sample)
         : null,
     });

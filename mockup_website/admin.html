@@ -72,6 +72,88 @@
                 </div>
             </section>
 
+            <section class="glass-panel admin-section" id="enhance-panel">
+                <h2>Enhance print</h2>
+                <p class="behavior-note">
+                    Type each sentence as shown. It advances on its own once the
+                    line matches, or press Next sentence to move on. Ten rounds
+                    build a denser keystroke profile than ordinary browsing does.
+                </p>
+
+                <div class="enhance-head">
+                    <span class="enhance-progress" id="enhance-progress">Round 0 of 10</span>
+                    <div class="enhance-bar"><span id="enhance-bar-fill"></span></div>
+                </div>
+
+                <p class="enhance-prompt" id="enhance-prompt">
+                    Press Start to begin the typing test.
+                </p>
+
+                <div class="input-group enhance-field">
+                    <input
+                        type="text"
+                        id="enhance-input"
+                        placeholder=" "
+                        autocomplete="off"
+                        autocapitalize="off"
+                        autocorrect="off"
+                        spellcheck="false"
+                        disabled
+                    >
+                    <label for="enhance-input">Type the sentence above</label>
+                </div>
+
+                <div class="enhance-live">
+                    <div class="behavior-stat">
+                        <span class="behavior-label">Keystrokes</span>
+                        <strong id="enhance-keys">0</strong>
+                    </div>
+                    <div class="behavior-stat">
+                        <span class="behavior-label">Words / minute</span>
+                        <strong id="enhance-wpm">—</strong>
+                    </div>
+                    <div class="behavior-stat">
+                        <span class="behavior-label">Mean hold (ms)</span>
+                        <strong id="enhance-hold">—</strong>
+                    </div>
+                    <div class="behavior-stat">
+                        <span class="behavior-label">Mean flight (ms)</span>
+                        <strong id="enhance-flight">—</strong>
+                    </div>
+                    <div class="behavior-stat">
+                        <span class="behavior-label">Corrections</span>
+                        <strong id="enhance-corrections">0</strong>
+                    </div>
+                </div>
+
+                <div class="behavior-actions">
+                    <button class="btn btn-primary" id="enhance-start">Start typing test</button>
+                    <button class="btn enhance-next" id="enhance-next" hidden disabled>
+                        Next sentence
+                    </button>
+                    <button class="btn" id="enhance-reset" hidden>Restart</button>
+                </div>
+
+                <p class="behavior-status" id="enhance-status"></p>
+
+                <div id="enhance-results" hidden style="overflow-x: auto; margin-top: 1.5rem;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Round</th>
+                                <th>Characters</th>
+                                <th>Seconds</th>
+                                <th>WPM</th>
+                                <th>Mean hold (ms)</th>
+                                <th>Mean flight (ms)</th>
+                                <th>Corrections</th>
+                            </tr>
+                        </thead>
+                        <tbody id="enhance-rounds"></tbody>
+                    </table>
+                </div>
+            </section>
+
             <section id="raw" class="glass-panel admin-section" hidden>
                 <h2>Full recorded data</h2>
                 <p class="behavior-note">
