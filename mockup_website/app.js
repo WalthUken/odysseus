@@ -56,10 +56,102 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initialize Chart
     initChart();
-    
+
     // Populate Table
     populateTable();
+
+    // Start recording this session's interaction timing
+    initBehaviorRecorder(username);
 });
+
+function initBehaviorRecorder(username) {
+    const panel = document.getElementById('behavior-panel');
+    if (!panel || !window.BehaviorCollector) {
+        return;
+    }
+
+    const collector = window.BehaviorCollector.create();
+    collector.start(document);
+
+    const status = document.getElementById('behavior-status');
+    const baselineBtn = document.getElementById('extract-baseline');
+    const sampleBtn = document.getElementById('extract-sample');
+
+    function text(id, value) {
+        const element = document.getElementById(id);
+        if (element) {
+            element.textContent = value === null || value === undefined ? '—' : value;
+        }
+    }
+
+    function refresh() {
+        const metrics = collector.metrics();
+        const elapsed = Math.floor(metrics.sessionDurationMs / 1000);
+        const minutes = String(Math.floor(elapsed / 60)).padStart(2, '0');
+        const seconds = String(elapsed % 60).padStart(2, '0');
+
+        text('behavior-clock', `${minutes}:${seconds}`);
+        text('stat-keystrokes', metrics.keyboard.keystrokes);
+        text('stat-keys-per-second', metrics.keyboard.keysPerSecond);
+        text('stat-hold', metrics.keyboard.holdMs.mean);
+        text('stat-flight', metrics.keyboard.flightMs.mean);
+        text('stat-distance', Math.round(metrics.mouse.totalDistancePx));
+        text('stat-speed', metrics.mouse.speedPxPerSecond.mean);
+        text('stat-peak-speed', metrics.mouse.speedPxPerSecond.max);
+        text('stat-direction', metrics.mouse.directionChanges);
+        text('stat-moves', metrics.mouse.moveSamples);
+        text('stat-clicks', metrics.mouse.clicks);
+    }
+
+    refresh();
+    setInterval(refresh, 500);
+
+    function setStatus(message, tone) {
+        status.textContent = message;
+        status.className = `behavior-status${tone ? ` behavior-status-${tone}` : ''}`;
+    }
+
+    async function extract(role, button, label) {
+        const metrics = collector.metrics();
+        if (metrics.keyboard.keystrokes === 0 && metrics.mouse.moveSamples === 0) {
+            setStatus('Type and move the pointer first, then extract.', 'warn');
+            return;
+        }
+
+        const originalText = button.textContent;
+        button.disabled = true;
+        button.textContent = 'Saving...';
+
+        try {
+            const response = await fetch('/api/behavior/' + role, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, metrics })
+            });
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(body.error || 'The extract could not be saved.');
+            }
+            setStatus(
+                `${label} saved for ${username}. Open the admin dashboard to cross-reference.`,
+                'ok'
+            );
+        } catch (error) {
+            setStatus(error.message, 'error');
+        } finally {
+            button.disabled = false;
+            button.textContent = originalText;
+        }
+    }
+
+    baselineBtn.addEventListener('click', () => {
+        extract('baseline', baselineBtn, 'Real-user baseline');
+    });
+
+    sampleBtn.addEventListener('click', () => {
+        extract('sample', sampleBtn, 'Cross-reference sample');
+    });
+}
 
 function initChart() {
     const ctx = document.getElementById('mainChart');
