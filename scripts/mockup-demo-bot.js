@@ -17,13 +17,6 @@ const { chromium } = require('playwright');
 const USERNAME = process.env.LOGIN_USER || 'username';
 const PASSWORD = process.env.LOGIN_PASS || 'password';
 
-const ANSWERS = {
-  maiden: 'Claire',
-  highschool: 'rosemere high',
-  pet: 'alexander',
-  sex: 'male',
-};
-
 const SLOW = Number(process.env.SLOW || 1);
 // The mockup must be loaded over HTTP, not file://. Sign-in, password recovery
 // and the silent telemetry upload are all same-origin fetches against the
@@ -150,19 +143,8 @@ async function main() {
   await humanType(page, page.locator('#password'), PASSWORD, 'Password');
   await humanClick(page, page.locator('#login-form button[type=submit]'), 'Sign In');
 
-  await page.locator('#step-2').waitFor({ state: 'visible', timeout: 10000 });
-  await wait(600);
-
-  // --- Step 2: security questions ---
-  await humanType(page, page.locator('#maiden-name'), ANSWERS.maiden, "Mother's maiden name");
-  await humanType(page, page.locator('#highschool'), ANSWERS.highschool, 'First highschool');
-  await humanType(page, page.locator('#pet'), ANSWERS.pet, 'First pet');
-  await humanClick(page, page.locator(`input[name=sex][value=${ANSWERS.sex}]`), `Sex: ${ANSWERS.sex}`);
-  await humanClick(
-    page,
-    page.locator('#security-form button[type=submit]'),
-    'Verify & Access Terminal'
-  );
+  // Signing in now lands on the dashboard directly. The security questions
+  // moved behind "Forgot your password?" and are no longer part of this path.
 
   // --- Dashboard ---
   await page.waitForURL('**/index.html', { timeout: 15000 });
@@ -170,11 +152,32 @@ async function main() {
   await ensureCursor(page);
   await wait(1200); // let the entry animations settle
 
-  for (const symbol of ['SPY', 'QQQ', 'NVDA']) {
+  // Open each ticker and place an order. The quantity and limit fields are the
+  // only keyboard source on this page, and keystroke timing is what the
+  // behavioral check actually leans on, so a run that only moves the mouse
+  // exercises almost none of the detection path.
+  const ORDERS = [
+    { symbol: 'SPY', quantity: '25', limit: '512.40' },
+    { symbol: 'QQQ', quantity: '10', limit: '438.15' },
+    { symbol: 'NVDA', quantity: '5', limit: '121.80' },
+  ];
+
+  for (const order of ORDERS) {
     const card = page.locator('.stock-card', {
-      has: page.locator('.stock-symbol', { hasText: new RegExp(`^${symbol}$`) }),
+      has: page.locator('.stock-symbol', { hasText: new RegExp(`^${order.symbol}$`) }),
     });
-    await humanClick(page, card, `${symbol} card`);
+    await humanClick(page, card, `${order.symbol} card`);
+    await page.locator('#ticker-modal').waitFor({ state: 'visible', timeout: 10000 });
+    await wait(500);
+
+    await humanType(page, page.locator('#order-quantity'), order.quantity, 'Quantity');
+    await humanType(page, page.locator('#order-limit'), order.limit, 'Limit price');
+    await humanClick(page, page.locator('#order-submit'), `Submit ${order.symbol} order`);
+    await wait(700);
+
+    await humanClick(page, page.locator('#ticker-modal-close'), 'Close ticker');
+    await page.locator('#ticker-modal').waitFor({ state: 'hidden', timeout: 10000 });
+    await wait(400);
   }
 
   await humanClick(page, page.locator('#theme-toggle'), 'Night/light mode toggle');

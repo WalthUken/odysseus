@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - OptionsFlow</title>
+    <meta name="description" content="Cross-reference recorded session behavior">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="admin-shell">
+        <header class="admin-topbar">
+            <div class="logo">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent-color)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                </svg>
+                Options<span>Flow</span> Admin
+            </div>
+            <div class="admin-topbar-actions">
+                <a class="btn admin-link" href="/index.html">Back to dashboard</a>
+                <a class="btn admin-link" href="http://127.0.0.1:3000/admin" target="_blank" rel="noopener">
+                    Odysseus report viewer
+                </a>
+            </div>
+        </header>
+
+        <main class="admin-main">
+            <section class="glass-panel admin-section">
+                <h1>Cross-reference a session</h1>
+                <p class="behavior-note">
+                    Compares the saved real-user extract (button 1) against the
+                    latest cross-reference extract (button 2) for one account.
+                </p>
+
+                <form id="report-form" class="admin-form">
+                    <div class="input-group" style="margin-bottom: 0;">
+                        <input type="text" id="report-username" placeholder=" " required autocomplete="off">
+                        <label for="report-username">Account username</label>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Cross-reference</button>
+                </form>
+
+                <p class="behavior-status" id="report-status"></p>
+            </section>
+
+            <section id="verdict-box" class="glass-panel admin-section" hidden>
+                <h2 id="verdict-title">—</h2>
+                <p id="verdict-detail" class="behavior-note"></p>
+            </section>
+
+            <section id="results" class="glass-panel admin-section table-container" hidden>
+                <h2>Recorded statistics</h2>
+                <div class="admin-captures">
+                    <span>Real user captured: <strong id="baseline-time">—</strong></span>
+                    <span>Cross-reference captured: <strong id="sample-time">—</strong></span>
+                </div>
+                <div style="overflow-x: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Statistic</th>
+                                <th>Real user (1)</th>
+                                <th>This session (2)</th>
+                                <th>Difference</th>
+                            </tr>
+                        </thead>
+                        <tbody id="comparison-body"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section id="raw" class="glass-panel admin-section" hidden>
+                <h2>Full recorded data</h2>
+                <p class="behavior-note">
+                    Every number saved for this account, exactly as recorded.
+                </p>
+                <pre class="admin-raw" id="raw-json"></pre>
+            </section>
+        </main>
+    </div>
+    <script src="admin.js"></script>
+</body>
+</html>
