@@ -5,8 +5,172 @@
 // site and on the local report viewer at /admin. Odysseus stores them in
 // data/odysseus.sqlite; this server keeps no account file of its own.
 
+const fs = require("fs/promises");
 const path = require("path");
 const express = require("express");
+
+const BEHAVIOR_FILE = path.join(__dirname, "data", "behavior.json");
+
+// A pair of sessions is called a mismatch when the typing and pointer speeds
+// are this far apart. Demo thresholds, not a validated identity test.
+const MISMATCH_AVERAGE_PERCENT = 40;
+const MISMATCH_SINGLE_PERCENT = 60;
+const MIN_SAMPLES = 5;
+
+const COMPARED_METRICS = [
+  {
+    key: "keysPerSecond",
+    label: "Typing speed (keys/second)",
+    unit: "keys/s",
+    read: (metrics) => metrics.keyboard?.keysPerSecond,
+    support: (metrics) => metrics.keyboard?.keystrokes || 0,
+  },
+  {
+    key: "holdMean",
+    label: "Mean key hold (ms)",
+    unit: "ms",
+    read: (metrics) => metrics.keyboard?.holdMs?.mean,
+    support: (metrics) => metrics.keyboard?.holdMs?.count || 0,
+  },
+  {
+    key: "flightMean",
+    label: "Mean flight between keys (ms)",
+    unit: "ms",
+    read: (metrics) => metrics.keyboard?.flightMs?.mean,
+    support: (metrics) => metrics.keyboard?.flightMs?.count || 0,
+  },
+  {
+    key: "mouseSpeedMean",
+    label: "Mean pointer speed (px/second)",
+    unit: "px/s",
+    read: (metrics) => metrics.mouse?.speedPxPerSecond?.mean,
+    support: (metrics) => metrics.mouse?.speedPxPerSecond?.count || 0,
+  },
+  {
+    key: "mouseSpeedMedian",
+    label: "Median pointer speed (px/second)",
+    unit: "px/s",
+    read: (metrics) => metrics.mouse?.speedPxPerSecond?.median,
+    support: (metrics) => metrics.mouse?.speedPxPerSecond?.count || 0,
+  },
+  {
+    key: "directionChangeRate",
+    label: "Direction changes per second",
+    unit: "/s",
+    read: (metrics) => metrics.mouse?.directionChangesPerSecond,
+    support: (metrics) => metrics.mouse?.moveSamples || 0,
+  },
+];
+
+async function readBehavior() {
+  try {
+    const raw = await fs.readFile(BEHAVIOR_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed.profiles === "object" && parsed.profiles
+      ? parsed.profiles
+      : {};
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return {};
+    }
+    throw error;
+  }
+}
+
+async function writeBehavior(profiles) {
+  await fs.mkdir(path.dirname(BEHAVIOR_FILE), { recursive: true });
+  await fs.writeFile(
+    BEHAVIOR_FILE,
+    `${JSON.stringify({ profiles }, null, 2)}\n`,
+    "utf8",
+  );
+}
+
+// Extracts read then write the same file, so run them one at a time.
+let behaviorQueue = Promise.resolve();
+
+function queueBehavior(task) {
+  const result = behaviorQueue.then(task, task);
+  behaviorQueue = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
+
+function percentDifference(baseline, sample) {
+  const reference = Math.max(Math.abs(baseline), Math.abs(sample));
+  if (!Number.isFinite(reference) || reference === 0) {
+    return null;
+  }
+  return Math.round((Math.abs(baseline - sample) / reference) * 1000) / 10;
+}
+
+function compare(baseline, sample) {
+  const rows = COMPARED_METRICS.map((metric) => {
+    const baselineValue = metric.read(baseline.metrics);
+    const sampleValue = metric.read(sample.metrics);
+    const comparable = (
+      Number.isFinite(baselineValue)
+      && Number.isFinite(sampleValue)
+      && metric.support(baseline.metrics) >= MIN_SAMPLES
+      && metric.support(sample.metrics) >= MIN_SAMPLES
+    );
+
+    return {
+      key: metric.key,
+      label: metric.label,
+      unit: metric.unit,
+      baseline: Number.isFinite(baselineValue) ? baselineValue : null,
+      sample: Number.isFinite(sampleValue) ? sampleValue : null,
+      differencePercent: comparable
+        ? percentDifference(baselineValue, sampleValue)
+        : null,
+      comparable,
+    };
+  });
+
+  const scored = rows.filter(
+    (row) => row.comparable && Number.isFinite(row.differencePercent),
+  );
+  const averageDifference = scored.length
+    ? Math.round(
+      (scored.reduce((total, row) => total + row.differencePercent, 0)
+        / scored.length) * 10,
+    ) / 10
+    : null;
+  const worst = scored.reduce(
+    (highest, row) =>
+      !highest || row.differencePercent > highest.differencePercent
+        ? row
+        : highest,
+    null,
+  );
+
+  let verdict = "insufficient_data";
+  if (scored.length > 0) {
+    const mismatch = (
+      averageDifference > MISMATCH_AVERAGE_PERCENT
+      || (worst && worst.differencePercent > MISMATCH_SINGLE_PERCENT)
+    );
+    verdict = mismatch ? "different_user" : "same_user";
+  }
+
+  return {
+    verdict,
+    averageDifference,
+    largestDifference: worst
+      ? { label: worst.label, differencePercent: worst.differencePercent }
+      : null,
+    comparedMetrics: scored.length,
+    thresholds: {
+      averagePercent: MISMATCH_AVERAGE_PERCENT,
+      singleMetricPercent: MISMATCH_SINGLE_PERCENT,
+      minimumSamples: MIN_SAMPLES,
+    },
+    rows,
+  };
+}
 
 const PORT = Number(process.env.MOCKUP_PORT || 4000);
 const HOST = process.env.MOCKUP_HOST || "127.0.0.1";
@@ -157,6 +321,89 @@ app.post("/api/login", async (request, response) => {
     }
     console.error("login failed", error);
     response.status(500).json({ error: "Could not sign you in" });
+  }
+});
+
+function behaviorKey(value) {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function validMetrics(metrics) {
+  return (
+    metrics
+    && typeof metrics === "object"
+    && typeof metrics.keyboard === "object"
+    && typeof metrics.mouse === "object"
+  );
+}
+
+// role "baseline" is the real-user reference, "sample" is the session being
+// checked against it.
+for (const role of ["baseline", "sample"]) {
+  app.post(`/api/behavior/${role}`, async (request, response) => {
+    const key = behaviorKey(request.body?.username);
+    const metrics = request.body?.metrics;
+
+    if (!key) {
+      response.status(400).json({ error: "Sign in before extracting" });
+      return;
+    }
+    if (!validMetrics(metrics)) {
+      response.status(400).json({ error: "The recorded session was empty" });
+      return;
+    }
+
+    try {
+      await queueBehavior(async () => {
+        const profiles = await readBehavior();
+        const profile = profiles[key] || {};
+        profile[role] = {
+          capturedAt: new Date().toISOString(),
+          metrics,
+        };
+        if (role === "baseline") {
+          // A new reference invalidates the previous comparison.
+          delete profile.sample;
+        }
+        profiles[key] = profile;
+        await writeBehavior(profiles);
+      });
+      response.status(201).json({ role, username: key });
+    } catch (error) {
+      console.error(`could not store the ${role}`, error);
+      response.status(500).json({ error: "The extract could not be saved" });
+    }
+  });
+}
+
+app.get("/api/behavior/report", async (request, response) => {
+  const key = behaviorKey(request.query.username);
+  if (!key) {
+    response.status(400).json({ error: "Enter an account username" });
+    return;
+  }
+
+  try {
+    const profiles = await readBehavior();
+    const profile = profiles[key];
+    if (!profile || !profile.baseline) {
+      response.status(404).json({
+        error: "No real-user extract is saved for that account yet",
+      });
+      return;
+    }
+
+    response.json({
+      username: key,
+      baseline: profile.baseline,
+      sample: profile.sample || null,
+      comparison: profile.sample
+        ? compare(profile.baseline, profile.sample)
+        : null,
+    });
+  } catch (error) {
+    console.error("could not build the behavior report", error);
+    response.status(500).json({ error: "The report could not be built" });
   }
 });
 

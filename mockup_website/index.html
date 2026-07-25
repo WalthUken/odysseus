@@ -47,9 +47,7 @@
             <div style="margin-top: auto;">
                 <a
                     class="btn admin-link"
-                    href="http://127.0.0.1:3000/admin"
-                    target="_blank"
-                    rel="noopener"
+                    href="/admin.html"
                     style="margin-bottom: 0.75rem;"
                 >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -169,8 +167,80 @@
                     </tbody>
                 </table>
             </section>
+
+            <!-- Behavioral session recorder -->
+            <section class="glass-panel table-container dashboard-anim delay-3" id="behavior-panel">
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.5rem;">
+                    <div>
+                        <h3>Session behavior</h3>
+                        <p class="behavior-note">
+                            Recording keystroke and pointer timing since you reached this
+                            page. Timing only, never typed text or cursor positions.
+                        </p>
+                    </div>
+                    <span class="behavior-live" id="behavior-clock">00:00</span>
+                </div>
+
+                <div class="behavior-grid">
+                    <div class="behavior-stat">
+                        <span class="behavior-label">Keystrokes</span>
+                        <strong id="stat-keystrokes">0</strong>
+                    </div>
+                    <div class="behavior-stat">
+                        <span class="behavior-label">Keys / second</span>
+                        <strong id="stat-keys-per-second">—</strong>
+                    </div>
+                    <div class="behavior-stat">
+                        <span class="behavior-label">Mean hold (ms)</span>
+                        <strong id="stat-hold">—</strong>
+                    </div>
+                    <div class="behavior-stat">
+                        <span class="behavior-label">Mean flight (ms)</span>
+                        <strong id="stat-flight">—</strong>
+                    </div>
+                    <div class="behavior-stat">
+                        <span class="behavior-label">Mouse distance (px)</span>
+                        <strong id="stat-distance">0</strong>
+                    </div>
+                    <div class="behavior-stat">
+                        <span class="behavior-label">Mean speed (px/s)</span>
+                        <strong id="stat-speed">—</strong>
+                    </div>
+                    <div class="behavior-stat">
+                        <span class="behavior-label">Peak speed (px/s)</span>
+                        <strong id="stat-peak-speed">—</strong>
+                    </div>
+                    <div class="behavior-stat">
+                        <span class="behavior-label">Direction changes</span>
+                        <strong id="stat-direction">0</strong>
+                    </div>
+                    <div class="behavior-stat">
+                        <span class="behavior-label">Move samples</span>
+                        <strong id="stat-moves">0</strong>
+                    </div>
+                    <div class="behavior-stat">
+                        <span class="behavior-label">Clicks</span>
+                        <strong id="stat-clicks">0</strong>
+                    </div>
+                </div>
+
+                <div class="behavior-actions">
+                    <button class="btn btn-primary" id="extract-baseline">
+                        1 · Extract as real user
+                    </button>
+                    <button class="btn" id="extract-sample">
+                        2 · Extract to cross-reference
+                    </button>
+                    <a class="btn admin-link behavior-admin" href="/admin.html">
+                        Admin dashboard
+                    </a>
+                </div>
+
+                <p class="behavior-status" id="behavior-status"></p>
+            </section>
         </main>
     </div>
+    <script src="behavior.js"></script>
     <script src="app.js"></script>
 </body>
 </html>
