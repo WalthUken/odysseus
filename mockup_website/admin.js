@@ -57,7 +57,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const fraud = comparison.verdict === 'different_user';
         verdictBox.className = `glass-panel admin-section ${fraud ? 'verdict-alert' : 'verdict-ok'}`;
         verdictTitle.textContent = fraud
-            ? 'You are not the real user'
+            ? 'Inconsistent with the real user'
             : 'Consistent with the real user';
 
         const largest = comparison.largestDifference;
@@ -68,7 +68,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 ? `Largest gap: ${largest.label} at ${largest.differencePercent}%.`
                 : '',
             `Flagged when the average passes ${comparison.thresholds.averagePercent}% `
-            + `or any single statistic passes ${comparison.thresholds.singleMetricPercent}%.`
+            + `or any single statistic passes ${comparison.thresholds.singleMetricPercent}%.`,
+            'This is a demo comparison against fixed thresholds, not a verified '
+            + 'identity decision.'
         ].filter(Boolean).join(' ');
     }
 
