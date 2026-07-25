@@ -36,12 +36,52 @@
                         Sign In
                     </button>
                 </form>
+
+                <p class="auth-switch">
+                    Don't have an account?
+                    <a href="#" id="show-signup">Create an account</a>
+                </p>
+            </div>
+
+            <div id="step-signup" style="display: none;">
+                <div class="login-header">
+                    <h1>Create Account</h1>
+                    <p>Set up your terminal access</p>
+                </div>
+
+                <div id="signup-error">Passwords do not match</div>
+
+                <form id="signup-form">
+                    <div class="input-group">
+                        <input type="text" id="new-username" placeholder=" " required autocomplete="off">
+                        <label for="new-username">Choose a username</label>
+                    </div>
+
+                    <div class="input-group">
+                        <input type="password" id="new-password" placeholder=" " required>
+                        <label for="new-password">Choose a password</label>
+                    </div>
+
+                    <div class="input-group">
+                        <input type="password" id="confirm-password" placeholder=" " required>
+                        <label for="confirm-password">Confirm password</label>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">
+                        Create Account
+                    </button>
+                </form>
+
+                <p class="auth-switch">
+                    Already have an account?
+                    <a href="#" id="show-signin">Sign in</a>
+                </p>
             </div>
 
             <div id="step-2" style="display: none;">
                 <div class="login-header">
                     <h1>Security Questions</h1>
-                    <p>Please verify your identity to proceed</p>
+                    <p id="security-subtitle">Please verify your identity to proceed</p>
                 </div>
 
                 <form id="security-form">
@@ -84,6 +124,18 @@
             <div style="margin-top: 2rem; text-align: center; font-size: 0.85rem; color: var(--text-secondary);">
                 <p>Demo credentials:<br>Username: <strong>username</strong> | Password: <strong>password</strong></p>
             </div>
+
+            <a
+                class="btn admin-link"
+                href="http://127.0.0.1:3000/admin"
+                target="_blank"
+                rel="noopener"
+            >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                </svg>
+                Open admin report viewer
+            </a>
         </div>
     </div>
     <script src="login.js"></script>

@@ -121,26 +121,29 @@ browser. Browser event trust is therefore one weak signal, not proof.
 
 1. Open `/admin` on the same computer.
 2. Enter the target account username.
-3. Enter the local admin access code.
+3. Enter that account's sign-in password.
 4. Prepare the report.
 
-The checked-in code does not contain the active access code. The local ignored
-`.env` file configures `adminbypass` for this demo. The route is rejected in
-production and for non-loopback clients. It is CSRF protected, rate limited,
-audited, marked `no-store`, and does not create an admin session.
+The viewer takes the same credentials as the sign-in page. `.env` still gates
+whether the viewer exists at all through `ODYSSEUS_DEMO_ADMIN_BYPASS`, but that
+value is now only an on/off switch and is never accepted as a credential. The
+route is rejected in production and for non-loopback clients. It is CSRF
+protected, rate limited, audited, marked `no-store`, and does not create an
+admin session.
 
-The account name selects the locally saved report. It is not a second
-credential. The shared admin code is intentionally a demo convenience and is
-not a production administrator design.
+Password authentication means an account reads only its own saved report. This
+remains a local demo convenience and is not a production administrator design:
+it grants the full record dump to anyone holding the account password on this
+machine.
 
-The report deliberately omits passwords, password hashes, admin codes, session
-credentials, CSRF credentials, device fingerprint digests, passkey keys,
-encrypted ciphertext, encryption keys, typed content, and raw events.
+The report deliberately omits passwords, password hashes, session credentials,
+CSRF credentials, device fingerprint digests, passkey keys, encrypted
+ciphertext, encryption keys, typed content, and raw events.
 
 ### Stronger local report
 
 1. Open `/admin/test` on the same computer.
-2. Enter the target account name and local admin access code.
+2. Enter the target account name and that account's sign-in password.
 3. Select the saved profile and label the test as Human A, Human B, or
    Automated agent.
 4. Complete three fresh rounds in the new interface.

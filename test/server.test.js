@@ -1014,7 +1014,7 @@ test("serves and strengthens a local account fingerprint report", async (context
     method: "POST",
     body: {
       username: "human-a-demo",
-      adminBypass: "wrong-admin-code",
+      password: "wrong-account-password",
     },
   });
   assert.equal(wrongCode.response.status, 401);
@@ -1023,7 +1023,7 @@ test("serves and strengthens a local account fingerprint report", async (context
     method: "POST",
     body: {
       username: "human-a-demo",
-      adminBypass: "adminbypass",
+      password: "test06",
     },
   });
   assert.equal(opened.response.status, 200);
@@ -1058,7 +1058,7 @@ test("serves and strengthens a local account fingerprint report", async (context
     method: "POST",
     body: {
       username: "human-a-demo",
-      adminBypass: "adminbypass",
+      password: "test06",
       profileId: "human-a-report",
       demoSubjectLabel: "Human A",
       samples: [
@@ -1103,7 +1103,7 @@ test("serves and strengthens a local account fingerprint report", async (context
     method: "POST",
     body: {
       username: "human-a-demo",
-      adminBypass: "adminbypass",
+      password: "test06",
     },
   });
   assert.equal(reopened.response.status, 200);

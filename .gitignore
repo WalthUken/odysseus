@@ -8,3 +8,4 @@ data/master.key
 data/*.migrated-backup
 .env
 coverage/
+mockup_website/data/

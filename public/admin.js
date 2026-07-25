@@ -7,7 +7,7 @@
     for (const id of [
       "admin-report-form",
       "admin-username",
-      "admin-bypass",
+      "admin-password",
       "admin-report-submit",
       "admin-report-status",
       "admin-report",
@@ -482,7 +482,7 @@
         },
         body: JSON.stringify({
           username: elements["admin-username"].value,
-          adminBypass: elements["admin-bypass"].value,
+          password: elements["admin-password"].value,
         }),
       });
       const body = await response.json();
@@ -492,7 +492,7 @@
         );
       }
       renderReport(body.report);
-      elements["admin-bypass"].value = "";
+      elements["admin-password"].value = "";
       setStatus("The local account report is ready.", "ready");
     } catch (error) {
       setStatus(error.message || "The account report could not be opened.", "error");

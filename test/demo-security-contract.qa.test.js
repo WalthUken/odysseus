@@ -102,6 +102,7 @@ function routeHarness(overrides = {}) {
     username: "person-a",
     createdAt: "2026-07-25T12:00:00.000Z",
     disabledAt: null,
+    ["password" + "Hash"]: "stored-password-digest",
   };
   const database = {
     ...reportDatabase(),
@@ -117,7 +118,6 @@ function routeHarness(overrides = {}) {
   };
   const context = {
     HttpError: TestHttpError,
-    adminBypassHash: "stored-code-digest",
     async appendAudit(event) {
       audits.push(event);
       return {
@@ -145,10 +145,11 @@ function routeHarness(overrides = {}) {
     sameOrigin(_request, _response, next) {
       next();
     },
-    verifyToken(supplied, digest) {
+    dummyPasswordHash: "dummy-password-digest",
+    async verifyPassword(supplied, storedHash) {
       return (
         supplied === "correct-local-code"
-        && digest === "stored-code-digest"
+        && storedHash === "stored-password-digest"
       );
     },
     ...overrides.context,
@@ -279,7 +280,9 @@ test("the local admin report returns bounded fields and redacts secrets", async 
     assert.doesNotMatch(serialized, new RegExp(secret));
   }
   assert.ok(report.omitted.some((value) => /password hash/i.test(value)));
-  assert.ok(report.omitted.some((value) => /admin access code/i.test(value)));
+  assert.ok(
+    report.omitted.some((value) => /session and csrf/i.test(value)),
+  );
   assert.ok(report.omitted.some((value) => /typed text/i.test(value)));
 });
 
@@ -289,7 +292,7 @@ test("the local admin report rejects remote and incorrect access", async () => {
     remote.reportHandler({
       body: {
         username: "person-a",
-        adminBypass: "correct-local-code",
+        password: "correct-local-code",
       },
       socket: {
         remoteAddress: "203.0.113.10",
@@ -307,7 +310,7 @@ test("the local admin report rejects remote and incorrect access", async () => {
     incorrect.reportHandler({
       body: {
         username: "person-a",
-        adminBypass: "incorrect-local-code",
+        password: "incorrect-local-code",
       },
       socket: {
         remoteAddress: "127.0.0.1",
@@ -337,7 +340,7 @@ test("the local admin report is no-store and creates no admin session", async ()
   const request = {
     body: {
       username: "person-a",
-      adminBypass: "correct-local-code",
+      password: "correct-local-code",
     },
     socket: {
       remoteAddress: "::ffff:127.0.0.1",
@@ -384,7 +387,7 @@ test("/admin/test scores and strengthens independently of the subject label", as
     await harness.testHandler({
       body: {
         username: "person-a",
-        adminBypass: "correct-local-code",
+        password: "correct-local-code",
         profileId: profile.profileId,
         demoSubjectLabel,
         samples: strongSamples(),
@@ -450,7 +453,7 @@ test("/admin/test never applies automation-risk samples to the template", async 
   await harness.testHandler({
     body: {
       username: "person-a",
-      adminBypass: "correct-local-code",
+      password: "correct-local-code",
       profileId: profile.profileId,
       demoSubjectLabel: "Human A",
       samples: strongSamples({

@@ -36,7 +36,7 @@
         <p class="panel-kicker">Local demo only</p>
         <h1 id="admin-title">Inspect one account fingerprint</h1>
         <p>
-          Enter the account name and the separate local admin access code.
+          Enter the same account name and password used to sign in.
           The saved report shows identity similarity, automation risk,
           decision reasons, contributing features, sample totals, and
           fingerprint update history. This viewer does not create an admin
@@ -49,8 +49,8 @@
           <p class="panel-kicker">Local report access</p>
           <h2 id="admin-access-title">Open an account report</h2>
           <p>
-            The admin code is the local gate for reports already saved under
-            the selected account name. Failed attempts are limited and audited.
+            The account password opens the reports already saved under that
+            account name. Failed attempts are limited and audited.
           </p>
         </div>
         <form id="admin-report-form" class="admin-report-form">
@@ -67,14 +67,13 @@
             >
           </div>
           <div class="field">
-            <label for="admin-bypass">Admin access code</label>
+            <label for="admin-password">Account password</label>
             <input
-              id="admin-bypass"
-              name="adminBypass"
+              id="admin-password"
+              name="password"
               type="password"
-              minlength="10"
               maxlength="512"
-              autocomplete="off"
+              autocomplete="current-password"
               required
             >
           </div>

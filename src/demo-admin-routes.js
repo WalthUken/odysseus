@@ -352,7 +352,6 @@ async function buildAccountDemoReport(database, user) {
     recentActivity: events.slice(0, 50).map(publicActivity),
     omitted: [
       "Account password and password hash",
-      "Admin access code",
       "Session and CSRF credentials",
       "Device fingerprint digests",
       "Passkey credential IDs and public keys",
@@ -417,12 +416,17 @@ async function authorizeDemoAdmin(request, context, allowed) {
   const user = username
     ? await context.database.getUserByUsername(username)
     : null;
-  const suppliedBypass = boundedSecret(body.adminBypass);
-  const validBypass = context.verifyToken(
-    suppliedBypass,
-    context.adminBypassHash,
+  // The viewer takes the same account credentials as the sign-in page. A
+  // dummy hash keeps the work comparable when the account does not exist.
+  const suppliedPassword = boundedSecret(body.password);
+  const candidateHash = user && !user.disabledAt
+    ? user.passwordHash
+    : context.dummyPasswordHash;
+  const validPassword = await context.verifyPassword(
+    suppliedPassword,
+    candidateHash,
   );
-  if (!user || user.disabledAt || !validBypass) {
+  if (!user || user.disabledAt || !validPassword) {
     await context.appendAudit({
       userId: user?.id,
       eventType: "demo_admin.report_access",
@@ -437,7 +441,7 @@ async function authorizeDemoAdmin(request, context, allowed) {
     throw new context.HttpError(
       401,
       "INVALID_CREDENTIALS",
-      "The account name or admin access code is incorrect.",
+      "The account name or password is incorrect.",
     );
   }
   return { body, user };
@@ -647,7 +651,7 @@ function validateContext(context) {
     "normalizeUsername",
     "requireCsrf",
     "sameOrigin",
-    "verifyToken",
+    "verifyPassword",
   ];
   for (const name of requiredFunctions) {
     if (typeof context?.[name] !== "function") {
@@ -686,7 +690,7 @@ function registerDemoAdminRoutes(app, suppliedContext) {
       const { user } = await authorizeDemoAdmin(
         request,
         context,
-        new Set(["username", "adminBypass"]),
+        new Set(["username", "password"]),
       );
 
       const report = await buildAccountDemoReport(context.database, user);
@@ -715,7 +719,7 @@ function registerDemoAdminRoutes(app, suppliedContext) {
         context,
         new Set([
           "username",
-          "adminBypass",
+          "password",
           "profileId",
           "demoSubjectLabel",
           "samples",

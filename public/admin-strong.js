@@ -5,7 +5,7 @@
   const elements = {};
   const state = {
     username: "",
-    adminBypass: "",
+    password: "",
     samples: [],
     roundIndex: 0,
     routeProgress: 0,
@@ -20,7 +20,7 @@
     for (const id of [
       "admin-test-access-form",
       "admin-test-username",
-      "admin-test-bypass",
+      "admin-test-password",
       "admin-test-access-submit",
       "admin-test-access-status",
       "admin-test-workspace",
@@ -489,14 +489,14 @@
     try {
       const result = await request("/api/demo-admin/test", {
         username: state.username,
-        adminBypass: state.adminBypass,
+        password: state.password,
         profileId: elements["admin-test-profile"].value,
         demoSubjectLabel: elements["admin-test-subject"].value,
         samples: state.samples,
       });
       renderResult(result.report);
-      elements["admin-test-bypass"].value = "";
-      state.adminBypass = "";
+      elements["admin-test-password"].value = "";
+      state.password = "";
       const amendment =
         result.report.amendment ||
         result.report.fingerprintUpdate ||
@@ -547,10 +547,10 @@
     );
     try {
       const username = elements["admin-test-username"].value;
-      const adminBypass = elements["admin-test-bypass"].value;
+      const password = elements["admin-test-password"].value;
       const value = await request("/api/demo-admin/report", {
         username,
-        adminBypass,
+        password,
       });
       if (!Array.isArray(value.report.fingerprints)
         || value.report.fingerprints.length === 0) {
@@ -559,7 +559,7 @@
         );
       }
       state.username = username;
-      state.adminBypass = adminBypass;
+      state.password = password;
       const profile = elements["admin-test-profile"];
       profile.replaceChildren();
       for (const fingerprint of value.report.fingerprints) {

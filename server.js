@@ -1670,16 +1670,16 @@ async function createApp(options = {}) {
   });
   registerDemoAdminRoutes(app, {
     HttpError,
-    adminBypassHash: sha256(demoAdminBypass || DUMMY_LOGIN_VALUE),
     appendAudit,
     credentialAccountLimiter,
     credentialBurstLimiter,
     database,
+    dummyPasswordHash,
     enabled: Boolean(demoAdminBypass),
     normalizeUsername,
     requireCsrf,
     sameOrigin,
-    verifyToken,
+    verifyPassword,
   });
 
   app.get(
