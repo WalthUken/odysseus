@@ -107,6 +107,9 @@ function loadMockupContext(clock) {
   });
   const context = vm.createContext({
     document: documentStub,
+    // The collector reads the global performance clock, so it has to be stubbed
+    // here as well as on window or every timing lands on the real clock.
+    performance: { now: () => clock.value },
     window: {
       performance: { now: () => clock.value },
       location: { href: "" },
@@ -122,9 +125,19 @@ function loadMockupContext(clock) {
     fetch: () => Promise.resolve({ ok: true }),
     console: { log() {}, warn() {}, error() {} },
   });
-  vm.runInContext(readSource("mockup_website", "app.js"), context, {
-    filename: "mockup_website/app.js",
+  // The mockup no longer carries its own copy of the collector. It loads the
+  // shared telemetry.js, so what these tests compare is that the file the
+  // mockup serves and the file the console serves behave identically - a
+  // profile enrolled on one surface has to verify on the other.
+  vm.runInContext(readSource("mockup_website", "telemetry.js"), context, {
+    filename: "mockup_website/telemetry.js",
   });
+  const shared = context.window.OdysseusTelemetry
+    || context.OdysseusTelemetry;
+  context.createBehaviorCollector = options => shared.createCollector(options);
+  context.TELEMETRY_FEATURE_NAMES = shared.FEATURE_NAMES;
+  context.TELEMETRY_KEY_CLASS = shared.KEY_CLASS;
+  context.classifyTelemetryKey = shared.classifyKey;
   return context;
 }
 
